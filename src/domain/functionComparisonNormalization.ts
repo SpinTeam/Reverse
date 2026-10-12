@@ -145,6 +145,7 @@ export const commentProjection = (
 
 export const stringAndNameProjection = (
   snapshot: FunctionSnapshot,
+  includeSwiftLiterals = true,
 ): readonly unknown[] | null => {
   const values = [
     ...snapshot.dossier.referenced_strings.map(
@@ -167,10 +168,87 @@ export const stringAndNameProjection = (
         value,
       }),
     ),
+    ...(includeSwiftLiterals
+      ? (snapshot.dossier.swift_string_literals ?? [])
+      : []
+    ).map(
+      ({
+        source_address: sourceAddress,
+        value,
+        representation,
+        registers,
+      }) => ({
+        kind: "swift_string",
+        source_offset: relativeAddress(
+          sourceAddress,
+          snapshot.dossier.procedure.address,
+        ),
+        value,
+        representation,
+        registers,
+      }),
+    ),
   ];
   return values.some(({ source_offset: offset }) => offset === null)
     ? null
     : sorted(values);
+};
+
+/**
+ * Whether one use site is known to hold different literals in the two dossiers. A decoded
+ * literal is known wherever it was recorded; an absence is known only in a dossier whose
+ * decoding examined every use site, and the site where decoding stopped is never known.
+ */
+export const swiftLiteralSitesConflict = (
+  left: FunctionSnapshot,
+  right: FunctionSnapshot,
+): boolean => {
+  const leftSites = swiftLiteralSites(left);
+  const rightSites = swiftLiteralSites(right);
+  for (const site of new Set([
+    ...leftSites.values.keys(),
+    ...rightSites.values.keys(),
+  ])) {
+    if (leftSites.omitted.has(site) || rightSites.omitted.has(site)) continue;
+    const leftValues =
+      leftSites.values.get(site) ?? (leftSites.complete ? [] : undefined);
+    const rightValues =
+      rightSites.values.get(site) ?? (rightSites.complete ? [] : undefined);
+    if (leftValues === undefined || rightValues === undefined) continue;
+    if (canonicalJson(leftValues) !== canonicalJson(rightValues)) return true;
+  }
+  return false;
+};
+
+const swiftLiteralSites = (snapshot: FunctionSnapshot) => {
+  const base = snapshot.dossier.procedure.address;
+  const omissions = snapshot.dossier.swift_string_literal_omissions ?? [];
+  const site = (sourceAddress: string, registers: readonly string[]) => {
+    const offset = relativeAddress(sourceAddress, base);
+    return offset === null ? null : canonicalJson([offset, registers]);
+  };
+  const omitted = new Set(
+    omissions.map(({ source_address: sourceAddress, registers }) =>
+      site(sourceAddress, registers),
+    ),
+  );
+  // Keep the same literal facts the full strings_names projection compares.
+  const values = new Map<string, string[]>();
+  for (const literal of snapshot.dossier.swift_string_literals ?? []) {
+    const key = site(literal.source_address, literal.registers);
+    if (key === null) continue;
+    values.set(
+      key,
+      [
+        ...(values.get(key) ?? []),
+        canonicalJson([literal.value, literal.representation]),
+      ].sort(compareUnicodeCodePoints),
+    );
+  }
+  const complete =
+    snapshot.dossier.swift_string_literals !== undefined &&
+    omissions.length === 0;
+  return { values, omitted, complete };
 };
 
 export const sorted = (values: readonly unknown[]): readonly unknown[] =>
