@@ -27,6 +27,7 @@ import { dshDocument } from "./DshCordisPatch.js";
 import { resolveClientConfigTransactionPath } from "./ClientConfigPath.js";
 import { readRegularFileText } from "./RegularFileRead.js";
 import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
+import { claudeCodeLocalClients } from "./ClaudeCodeProjectDirectory.js";
 import {
   manualRegistrationRemediation,
   supportedClients,
@@ -200,23 +201,29 @@ export const systemUninstallHost = (
   selectedFileSystem: UninstallFileSystem | undefined = undefined,
   environment: Readonly<NodeJS.ProcessEnv> = process.env,
   platform: NodeJS.Platform = process.platform,
+  options: { readonly claudeProjectDirectory?: string } = {},
 ): UninstallHost => {
   const home =
     selectedHome ?? homeDirectoryFromEnvironment(environment, platform);
   const resources = new ArtifactResourceScope();
   const fileSystem = selectedFileSystem ?? systemFileSystem(resources);
   return {
-    clients: () =>
-      Promise.resolve(
-        supportedClients(home, platform, environment).flatMap((client) =>
-          client.configPaths === undefined
-            ? [client]
-            : client.configPaths.map((configPath) => ({
-                ...client,
-                configPath,
-              })),
-        ),
-      ),
+    clients: async () => {
+      if (options.claudeProjectDirectory !== undefined)
+        return claudeCodeLocalClients(
+          supportedClients(home, platform, environment),
+          options.claudeProjectDirectory,
+          resources,
+        );
+      return supportedClients(home, platform, environment).flatMap((client) =>
+        client.configPaths === undefined
+          ? [client]
+          : client.configPaths.map((configPath) => ({
+              ...client,
+              configPath,
+            })),
+      );
+    },
     inspectClient: async (client) => {
       const read = await readClientConfiguration(client, fileSystem);
       return read.kind === "item" && read.item.status === "failed"
@@ -225,8 +232,21 @@ export const systemUninstallHost = (
     },
     removeClient: (client) => removeClient(client, fileSystem),
     removeSkill: () =>
-      removeManagedSkills(home, fileSystem, environment, platform),
-    purgeData: () => purgeManagedData(join(home, ".rea"), fileSystem),
+      options.claudeProjectDirectory === undefined
+        ? removeManagedSkills(home, fileSystem, environment, platform)
+        : Promise.resolve(
+            item(
+              "skill",
+              "retained",
+              "Local uninstall retains personal skills.",
+            ),
+          ),
+    purgeData: () =>
+      options.claudeProjectDirectory === undefined
+        ? purgeManagedData(join(home, ".rea"), fileSystem)
+        : Promise.resolve([
+            item("data", "retained", "Local uninstall retains shared data."),
+          ]),
     close: async () => {
       try {
         await resources.close();
@@ -280,7 +300,12 @@ const readClientConfiguration = async (
     );
   }
   try {
-    const parsed = parseClientConfiguration(original, client.format);
+    const parsed = parseClientConfiguration(
+      original,
+      client.format,
+      client.claudeProjectDirectory,
+      { preserveDisabledPolicy: true },
+    );
     return { kind: "configuration", transactionPath, original, parsed };
   } catch (cause: unknown) {
     return itemRead(
@@ -373,6 +398,8 @@ const removeClient = async (
     const readback = parseClientConfiguration(
       await fileSystem.readText(transactionPath),
       client.format,
+      client.claudeProjectDirectory,
+      { preserveDisabledPolicy: true },
     );
     if (
       (removeNative && Object.hasOwn(readback.servers, name)) ||

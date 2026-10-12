@@ -32,6 +32,9 @@ import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.j
 interface ClientRegistrationStatusBase {
   readonly client: string;
   readonly config_path: string;
+  readonly registration_scope?: "user" | "local";
+  readonly project_directory?: string;
+  readonly requested_project_directory?: string;
 }
 
 type RegistrationCommand = readonly [string, ...string[]];
@@ -82,9 +85,17 @@ export const readClientRegistrationStatuses = async (
     readonly platform?: NodeJS.Platform;
     readonly environment?: NodeJS.ProcessEnv;
     readonly resources?: ArtifactResourceScope;
+    /** Explicit diagnostic scope; maintenance continues to inspect user registrations. */
+    readonly workspaceDirectory?: string;
   } = {},
 ): Promise<readonly ClientRegistrationStatus[]> => {
   const statuses: ClientRegistrationStatus[] = [];
+  let claudeScope:
+    | Pick<
+        ClientRegistrationStatusBase,
+        "registration_scope" | "project_directory"
+      >
+    | undefined;
   for (const client of supportedClients(
     home,
     options.platform,
@@ -117,6 +128,12 @@ export const readClientRegistrationStatuses = async (
       const files = await readClientConfigurationFiles(
         client,
         options.resources,
+        options.workspaceDirectory === undefined
+          ? {}
+          : {
+              workspaceDirectory: options.workspaceDirectory,
+              platform: options.platform ?? process.platform,
+            },
       );
       if (!files.ok) {
         statuses.push({
@@ -125,6 +142,18 @@ export const readClientRegistrationStatuses = async (
           command: [],
           state: "invalid",
           remediation: files.error.detail,
+          ...(files.error.requested_project_directory === undefined
+            ? {}
+            : {
+                requested_project_directory:
+                  files.error.requested_project_directory,
+              }),
+          ...(files.error.registration_scope === undefined
+            ? {}
+            : { registration_scope: files.error.registration_scope }),
+          ...(files.error.project_directory === undefined
+            ? {}
+            : { project_directory: files.error.project_directory }),
         });
         continue;
       }
@@ -134,6 +163,24 @@ export const readClientRegistrationStatuses = async (
           unavailableStatus(client.name, client.configPath, "missing"),
         );
         continue;
+      }
+      if (
+        client.name === "claude_code" &&
+        options.workspaceDirectory !== undefined
+      ) {
+        const local = parsed.serversPath[0] === "projects";
+        claudeScope = local
+          ? {
+              registration_scope: "local",
+              project_directory:
+                parsed.serversPath[1] ?? resolve(options.workspaceDirectory),
+            }
+          : {
+              registration_scope: "user",
+              ...(parsed.diagnosticProjectDirectory === undefined
+                ? {}
+                : { project_directory: parsed.diagnosticProjectDirectory }),
+            };
       }
       const policy = await readClientPolicyBlock(
         client,
@@ -178,6 +225,10 @@ export const readClientRegistrationStatuses = async (
         registration.command,
         ...registration.args,
       ];
+      const disabled = clientServerListedDisabled(
+        parsed,
+        PRODUCT_IDENTITY.mcpServerKey,
+      );
       statuses.push(
         configuredStatus(
           client.name,
@@ -190,15 +241,15 @@ export const readClientRegistrationStatuses = async (
             options.platform ?? process.platform,
             clientServerForcedEnabled(parsed, PRODUCT_IDENTITY.mcpServerKey),
           ) &&
-            !clientServerListedDisabled(
-              parsed,
-              PRODUCT_IDENTITY.mcpServerKey,
-            ) &&
+            !disabled &&
             (parsed.dialect !== "dsh" || dshDocument(parsed.document).ready) &&
             policyBlock === undefined
             ? "aligned"
             : "stale",
-          policyBlock,
+          policyBlock ??
+            (client.name === "claude_code" && disabled
+              ? "REA is disabled for this Claude Code project. Re-enable it in /mcp, then rerun doctor."
+              : undefined),
         ),
       );
     } catch (cause: unknown) {
@@ -211,9 +262,23 @@ export const readClientRegistrationStatuses = async (
       );
     }
   }
-  return statuses.sort((left, right) =>
-    compareUnicodeCodePoints(left.client, right.client),
-  );
+  return statuses
+    .map((status): ClientRegistrationStatus => {
+      const scope = status.client === "claude_code" ? claudeScope : undefined;
+      if (
+        scope?.registration_scope === "local" &&
+        status.state !== "aligned" &&
+        status.remediation === remediation
+      )
+        return {
+          ...status,
+          ...scope,
+          remediation:
+            "Run rea setup --client claude_code --scope local --project DIRECTORY using the reported project_directory, then restart the client.",
+        };
+      return { ...status, ...scope };
+    })
+    .sort((left, right) => compareUnicodeCodePoints(left.client, right.client));
 };
 
 const registrationAligned = (
@@ -320,7 +385,9 @@ const parseRegistration = (
   if (client.format === "commandcode" && registration.transport !== "stdio")
     throw new TypeError("Expected an stdio registration");
   if (
-    (client.format === "omp" || client.format === "pi") &&
+    (client.format === "omp" ||
+      client.format === "pi" ||
+      client.name === "claude_code") &&
     registration.type !== undefined &&
     registration.type !== "stdio"
   )
