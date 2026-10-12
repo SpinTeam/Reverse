@@ -195,11 +195,10 @@ const resolveLayoutExecutable = async (
 
   let name: string;
   try {
-    name =
-      plist.subarray(0, 6).toString("ascii") === "bplist"
-        ? await (fileSystem.decodeBinaryPlist?.(plistPath) ??
-            parseBinaryPlistExecutable(plist))
-        : parseXmlPlistExecutable(decodeXmlPlistText(plist));
+    name = plist.subarray(0, 6).equals(Buffer.from("bplist"))
+      ? await (fileSystem.decodeBinaryPlist?.(plistPath) ??
+          parseBinaryPlistExecutable(plist))
+      : parseXmlPlistExecutable(decodeXmlPlistText(plist));
   } catch (cause: unknown) {
     return err(
       new BinaryTargetError(
