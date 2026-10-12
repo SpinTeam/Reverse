@@ -55,8 +55,7 @@ import {
   type GhidraProviderClientFactory,
 } from "./GhidraProviderClient.js";
 import {
-  windowsNativeAuthorityUnavailableReason,
-  hasWindowsNativeAuthority,
+  inspectWindowsNativeReadiness,
   windowsNativeCapabilities,
 } from "../process/WindowsAuthority.js";
 
@@ -101,20 +100,24 @@ export class GhidraProvider implements AnalysisProviderCandidate {
   inspectAvailability(): ProviderAvailability {
     const installation = this.#inspectInstallation();
     const diagnostics = ghidraInstallationDiagnostics(installation);
-    if (
-      installation.status === "available" &&
-      installation.platform === "win32" &&
-      !hasWindowsNativeAuthority(installation.platform)
-    )
+    const readiness =
+      installation.status === "available" && installation.platform === "win32"
+        ? inspectWindowsNativeReadiness(installation.platform)
+        : undefined;
+    if (readiness?.available === false)
       return {
         status: "unavailable",
-        code: "unsupported_host",
-        reason: windowsNativeAuthorityUnavailableReason(installation.platform),
+        code: readiness.code,
+        reason: readiness.reason,
         diagnostics: {
           ...diagnostics,
           windows_security: jsonObjectSchema.parse(
-            windowsNativeCapabilities(installation.platform),
+            windowsNativeCapabilities(installation.platform, readiness),
           ),
+          windows_native_failure: {
+            stage: readiness.failureStage,
+            remediation: readiness.remediation,
+          },
         },
       };
     return installation.status === "available"
