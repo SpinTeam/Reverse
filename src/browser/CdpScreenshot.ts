@@ -165,7 +165,7 @@ const pngDimensions = (
   if (
     bytes.byteLength < 24 ||
     !bytes.subarray(0, 8).equals(PNG_SIGNATURE) ||
-    bytes.subarray(12, 16).toString("ascii") !== "IHDR"
+    bytes.subarray(12, 16).toString("latin1") !== "IHDR"
   )
     throw new BrowserObservationError("inspect_web_page", "protocol_error");
   const width = bytes.readUInt32BE(16);

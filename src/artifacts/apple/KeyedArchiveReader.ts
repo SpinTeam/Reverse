@@ -40,12 +40,12 @@ export const decodeKeyedArchiveBytes = (
 ) => {
   if (bytes.length > MAX_BYTES)
     throw new RangeError("Keyed archive exceeds 64 MiB");
-  if (bytes.subarray(0, 10).toString("ascii") === "NIBArchive")
+  if (bytes.subarray(0, 10).toString("latin1") === "NIBArchive")
     throw new KeyedArchiveKindError(
       "Selected file is a compiled NIBArchive, not a Foundation plist archive; decode it with decode_interface_builder",
       "nib-archive",
     );
-  const binary = bytes.subarray(0, 8).toString("ascii") === "bplist00";
+  const binary = bytes.subarray(0, 8).toString("latin1") === "bplist00";
   const xmlText = binary ? undefined : decodeXmlPlistText(bytes);
   // plist.parseBinary recurses on every object reference and copies shared
   // containers, so a few hundred bytes can exhaust memory or the stack.

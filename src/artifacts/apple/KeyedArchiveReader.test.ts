@@ -23,6 +23,21 @@ const archive = {
   $top: { root: { UID: 1 }, other: { UID: 2 } },
 };
 describe("inert keyed archive decoding", () => {
+  it("recognizes container magic by exact bytes, not high-bit lookalikes", () => {
+    const withMagic = (magic: Buffer) =>
+      Buffer.concat([magic, Buffer.alloc(40)]);
+    const highBit = (magic: string) =>
+      Buffer.from([...Buffer.from(magic)].map((byte) => byte | 0x80));
+    const selection = { offset: 0, limit: 10 };
+    expect(() =>
+      decodeKeyedArchiveBytes(withMagic(Buffer.from("NIBArchive")), selection),
+    ).toThrow(/compiled NIBArchive/u);
+    for (const magic of ["NIBArchive", "bplist00"])
+      expect(() =>
+        decodeKeyedArchiveBytes(withMagic(highBit(magic)), selection),
+      ).toThrow(/not valid for encoding utf-8/u);
+  });
+
   it("preserves CF$UID, malformed references and original pagination identities", () => {
     const bytes = Buffer.from(
       build({

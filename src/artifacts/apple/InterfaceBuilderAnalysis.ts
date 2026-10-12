@@ -95,7 +95,7 @@ export const analyzeInterfaceBuilderBundle = async (input: {
         );
         aggregateInputBytes += bytes.length;
         const isNibArchive =
-          bytes.subarray(0, 10).toString("ascii") === "NIBArchive";
+          bytes.subarray(0, 10).toString("latin1") === "NIBArchive";
         let nib: ReturnType<typeof projectNibArchive> | null = null;
         let xmlText: string | undefined;
         let binaryPrototypeKeyObserved = false;
@@ -113,7 +113,7 @@ export const analyzeInterfaceBuilderBundle = async (input: {
             "NIBArchive representation exceeds the aggregate Interface Builder decode budget",
           );
         } else {
-          if (bytes.subarray(0, 8).toString("ascii") !== "bplist00")
+          if (bytes.subarray(0, 8).toString("latin1") !== "bplist00")
             xmlText = decodeXmlPlistText(bytes);
           const decodedReservation = preflightPropertyListDecode(
             bytes,
@@ -665,7 +665,7 @@ const decodePlist = (
   readonly value: JsonValue;
   readonly omittedPrototypeKeys: number | null;
 } => {
-  const binary = bytes.subarray(0, 8).toString("ascii") === "bplist00";
+  const binary = bytes.subarray(0, 8).toString("latin1") === "bplist00";
   const { value, omittedPrototypeKeys } = binary
     ? {
         value: parseBinary(bytes),

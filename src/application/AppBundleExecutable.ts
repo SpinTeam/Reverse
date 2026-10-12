@@ -196,7 +196,7 @@ const resolveLayoutExecutable = async (
   let name: string;
   try {
     name =
-      plist.subarray(0, 6).toString("ascii") === "bplist"
+      plist.subarray(0, 6).toString("latin1") === "bplist"
         ? await (fileSystem.decodeBinaryPlist?.(plistPath) ??
             parseBinaryPlistExecutable(plist))
         : parseXmlPlistExecutable(decodeXmlPlistText(plist));

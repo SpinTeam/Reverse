@@ -95,7 +95,7 @@ export const preflightPropertyListDecode = (
   xmlText?: string,
 ): PlistDecodePreflight => {
   const expansion =
-    bytes.subarray(0, 8).toString("ascii") === "bplist00"
+    bytes.subarray(0, 8).toString("latin1") === "bplist00"
       ? estimateBinaryPlistExpansion(bytes, maxBytes)
       : {
           estimatedBytes: estimateXmlPlistExpansion(bytes, maxBytes, xmlText),

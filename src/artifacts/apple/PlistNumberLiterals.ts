@@ -126,7 +126,7 @@ export const binaryPlistNumberLiterals = (
   const output = collector();
   if (
     bytes.length < 40 ||
-    bytes.subarray(0, 8).toString("ascii") !== "bplist00"
+    bytes.subarray(0, 8).toString("latin1") !== "bplist00"
   )
     return output.result(true);
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
