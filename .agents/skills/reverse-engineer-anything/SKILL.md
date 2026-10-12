@@ -1,8 +1,8 @@
 ---
 name: reverse-engineer-anything
-description: Reverse engineer native, managed, Electron/JavaScript, packaged, firmware, and browser targets with REA. Use shipped-artifact or requested runtime evidence to explain features, compare versions, decompile code, or guide a reconstruction. Skip REA for ordinary source-repository architecture analysis.
+description: Reverse engineer native, managed, Electron/JavaScript, packaged, firmware, PlayStation disc, and browser targets with REA. Use shipped-artifact or requested runtime evidence to explain features, compare versions, decompile code, or guide a reconstruction. Skip REA for ordinary source-repository architecture analysis.
 metadata:
-  version: "40"
+  version: "41"
 ---
 
 # REA
@@ -46,6 +46,10 @@ explicit path or endpoint and do not need it.
 
 - ASAR or extracted JavaScript/Electron tree:
   `analyze_javascript_application`.
+- PlayStation 1 CUE/BIN, ISO, or PS-X EXE:
+  read [PS1 disc inspection](references/playstation-discs.md). The bundled
+  Python helper inspects sectors and boot declarations before executable analysis;
+  disc containers do not go directly to `open_binary`.
 - Archive/package member inventory (ZIP/APK/IPA/MSIX/AppX or DMG):
   `open_binary` with the supplied local path; use `inspect_artifact` when its
   graph and findings help answer the question.

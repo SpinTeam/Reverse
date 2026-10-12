@@ -94,7 +94,7 @@ jobs:
         run: npm run check:ci
       - if: needs.changes.outputs.code == 'true'
         run: npm run verify:test-discovery
-      - name: Check LLDB producer retention and launch contracts
+      - name: Check LLDB producer contracts and PS1 disc inspection
         if: needs.changes.outputs.code == 'true'
         run: npm run test:python
       - if: needs.changes.outputs.code != 'true'

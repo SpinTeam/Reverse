@@ -19,7 +19,7 @@ behavior, and complete CI evidence before merging.
 | `npm run test:boundary`           | Boundary, CLI boundary, MCP boundary, process boundary, and process-global projects                                     |
 | `npm run test:mcp`                | MCP boundary project                                                                                                    |
 | `npm run test:acceptance`         | Complete compiled CLI and MCP acceptance workflows                                                                      |
-| `npm run test:python`             | LLDB producer retention and launch contracts with a fake LLDB API; no native debugger required                          |
+| `npm run test:python`             | LLDB producer contracts and PS1 disc inspection with source-owned fixtures; no native debugger or game data required    |
 | `npm run test:watch`              | Dirty source tests in watch mode, without build                                                                         |
 | `npm run test:watch:all`          | Changed tests from every project; builds at startup, so rebuild after production edits before relying on compiled tests |
 | `npm run check:changed`           | Cached typecheck/lint and branch-related source feedback                                                                |
