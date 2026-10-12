@@ -8,6 +8,7 @@ import type { WasmArtifactService } from "../application/wasm/WasmArtifactServic
 import { wasmArtifactModule } from "../composition/wasm.js";
 import { registerWasmTools } from "./registerWasmTools.js";
 import { snapshotEnvironment } from "../process/snapshotEnvironment.js";
+import { captureProviderEnvironment } from "./providerEnvironment.js";
 import { createPeResourcesService } from "../composition/binaryDiagnostics.js";
 import { registerPeResourcesTool } from "./registerPeResourcesTool.js";
 import type { EvmInterfaceService } from "../application/evm/EvmInterfaceService.js";
@@ -115,6 +116,10 @@ import {
   type ServerAnalysisSource,
 } from "./analysisAdmission.js";
 import type { WithAdmittedAnalysis } from "./analysisAdmission.js";
+import { createReverseEngineeringService } from "../composition/reverseEngineering.js";
+import { registerReverseEngineeringTools } from "./registerReverseEngineeringTools.js";
+import { GdbSessionManager } from "../gdb/GdbSessionManager.js";
+import { registerGdbTools } from "./registerGdbTools.js";
 
 const TARGET_FREE_INSTRUCTIONS =
   "REA provides reverse-engineering tools for local artifacts, native binaries, managed code, browser pages, and runtimes. Use the tool that directly answers the question; discover targets or inspect inventory only when needed. Tool results include inline Evidence and report their coverage and limitations.";
@@ -132,6 +137,7 @@ export interface CreateServerOptions {
   readonly packetCapture?: PacketCaptureService;
   readonly signalRecording?: SignalRecordingService;
   readonly wasmArtifact?: WasmArtifactService;
+  readonly providerEnvironment?: Readonly<NodeJS.ProcessEnv>;
   readonly evmInterface?: EvmInterfaceService;
   readonly sqliteDatabase?: SqliteDatabaseService;
   readonly logger?: Logger;
@@ -263,6 +269,10 @@ export const createServer = (
   const session = source.kind === "session" ? source.session : undefined;
   const analysis = source.kind === "session" ? source.session : source.analysis;
   const environment = snapshotEnvironment(options.environment ?? process.env);
+  const providerEnvironment = captureProviderEnvironment(
+    options.providerEnvironment,
+    environment,
+  );
   const delivery = selectToolResultDelivery(environment, options.delivery);
   const evmInterface =
     options.evmInterface ?? evmInterfaceModule.create(environment);
@@ -279,6 +289,8 @@ export const createServer = (
   const javascriptRecovery =
     options.javascriptRecovery ?? createJavaScriptRecoveryProvider(environment);
   const artifactResources = new ArtifactResourceScope();
+  const reverseEngineering =
+    createReverseEngineeringService(providerEnvironment);
   const firmwareAnalysis = new FirmwareAnalysisService(
     options.firmwareAnalysis ?? createFirmwareAnalysisProvider(environment),
   );
@@ -301,6 +313,9 @@ export const createServer = (
     delivery,
     selectCompactInputSchemaPresentation(environment),
   );
+  const gdbSessions = new GdbSessionManager({
+    environment: providerEnvironment,
+  });
   const android =
     options.androidAnalysis ?? createAndroidAnalysisProvider(environment);
   const flutter =
@@ -341,7 +356,9 @@ export const createServer = (
       webModuleTrace.close(),
       javascriptRecovery.close?.() ?? Promise.resolve(),
       artifactResources.close(),
+      reverseEngineering.close(),
       firmwareAnalysis.close(),
+      gdbSessions.closeAll(),
     ])
       .then((results) => {
         const failures = results.flatMap((result) =>
@@ -384,6 +401,37 @@ export const createServer = (
     artifactResources,
   };
   registerBinaryAnalysisTools(toolContext);
+  registerReverseEngineeringTools(
+    server,
+    reverseEngineering,
+    toolLogger,
+    delivery,
+    session === undefined
+      ? undefined
+      : (evidence) => session.recordEvidence(evidence),
+    analysisAdmission,
+    session === undefined
+      ? undefined
+      : () => session.invalidateSnapshotForExternalMutation(),
+    session === undefined
+      ? undefined
+      : (path, signal, operation, rebindFailure) =>
+          session.withAdmittedExternalMutation(
+            path,
+            signal,
+            operation,
+            rebindFailure,
+          ),
+  );
+  registerGdbTools(
+    server,
+    gdbSessions,
+    toolLogger,
+    delivery,
+    session === undefined
+      ? undefined
+      : (evidence) => session.recordEvidence(evidence),
+  );
   registerFridaTools(
     server,
     fridaInstrumentation,
