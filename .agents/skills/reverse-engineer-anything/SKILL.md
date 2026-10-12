@@ -66,7 +66,7 @@ explicit path or endpoint and do not need it.
   sidecars without fetching recorded URLs or claiming live attribution. See
   [historical captures](https://github.com/morluto/rea/blob/main/docs/web-network-captures.md) for the exact upstream
   profile and credential exclusions.
-- User-owned Electron runtime already open: `list_electron_targets`.
+- User-owned Electron runtime already open: `list_electron_targets`. Before an electron-main Inspector attempt, check packaged fuses with `inspect_electron_fuses`; disabled `EnableNodeCliInspectArguments` means the app ignores `--inspect`.
 - Recorded packet captures: `inspect_packet_capture` with selected TShark fields,
   display filters and decode-as rules. Requires Linux, util-linux prlimit and `REA_TSHARK_COMMAND`; see
   [capture guide](https://github.com/morluto/rea/blob/main/docs/packet-captures.md).

@@ -38,6 +38,7 @@ export default defineConfig({
           },
           { text: "Browser observation", link: "/browser-observation" },
           { text: "Electron observation", link: "/electron-observation" },
+          { text: "Electron fuses", link: "/electron-fuses" },
           { text: "Process capture", link: "/process-capture" },
           { text: ".NET assemblies", link: "/managed-code-analysis" },
           { text: "Android applications", link: "/android-analysis" },
