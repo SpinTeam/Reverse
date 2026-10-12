@@ -178,7 +178,7 @@ def check_search_metadata(site, pages):
         if not title:
             errors.append(f"{label}: needs exactly one nonempty head title")
         first = path.relative_to(site).parts[0]
-        expected_language = first if re.fullmatch(r"[a-z]{2}(?:-[A-Z]{2})?", first) else "en"
+        expected_language = first if re.fullmatch(r"[a-z]{2,3}(?:-[A-Z]{2})?", first) else "en"
         if page.translation_fallback:
             if page.lang != "en" or not page.noindex():
                 errors.append(f"{label}: English translation fallback needs lang=en and noindex")
