@@ -2,7 +2,13 @@ import type { FileHandle } from "node:fs/promises";
 import { PassThrough, type Readable } from "node:stream";
 import { once } from "node:events";
 
-import { Reader, ZipReader, type Entry, type FileEntry } from "@zip.js/zip.js";
+import {
+  Reader,
+  Uint8ArrayReader,
+  ZipReader,
+  type Entry,
+  type FileEntry,
+} from "@zip.js/zip.js";
 
 import {
   ArtifactReaderFailure,
@@ -128,24 +134,39 @@ class NodeFileReader extends Reader<string> {
   }
 }
 
+/** Already-admitted bytes; the caller owns their identity and lifetime. */
+class AdmittedBytesReader extends Uint8ArrayReader {
+  closeHandle(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
 /** Lazy Zip64-capable reader with CRC and overlap verification on every read. */
 export class ZipArtifactReader implements ArtifactReader {
   readonly format: ZipPackageFormat;
-  readonly #source: NodeFileReader;
-  readonly #reader: ZipReader<string>;
+  readonly #source: NodeFileReader | AdmittedBytesReader;
+  readonly #reader: ZipReader<unknown>;
   readonly #entries = new Map<
     string,
     { readonly source: Entry; readonly metadata: ArtifactEntry }
   >();
-  /** Optionally bound each metadata read before allocating its backing buffer. */
+
+  /**
+   * Read a selected path, or bytes whose identity the caller already admitted
+   * (so reported digests describe exactly the parsed archive). Optionally
+   * bound each path-backed metadata read before allocating its buffer.
+   */
   constructor(
-    path: string,
+    source: string | Uint8Array,
     format: ZipPackageFormat,
     maximumMetadataReadBytes?: number,
     admitted?: StableRegularFileDescriptor,
   ) {
     this.format = format;
-    this.#source = new NodeFileReader(path, maximumMetadataReadBytes, admitted);
+    this.#source =
+      typeof source === "string"
+        ? new NodeFileReader(source, maximumMetadataReadBytes, admitted)
+        : new AdmittedBytesReader(source);
     this.#reader = new ZipReader(this.#source, {
       checkSignature: true,
       checkOverlappingEntry: true,
