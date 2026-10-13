@@ -2,6 +2,7 @@ import { z } from "zod";
 import { AnalysisOutputError } from "../domain/analysisErrorCore.js";
 import { jsonValueSchema, type JsonValue } from "../domain/jsonValue.js";
 import { digestSchema } from "../domain/digests.js";
+import { uniqueSorted } from "../domain/canonicalOrdering.js";
 import { firmwareLogicalPath } from "./FirmwareFiles.js";
 
 const integer = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
@@ -51,6 +52,15 @@ const multiFile = z.object({
   extraction_reports: z.array(jsonValueSchema),
 });
 const hashes = z.object({ sha256: digestSchema });
+/**
+ * The provider's structured missing-dependency report. Non-strict on purpose:
+ * unfamiliar extra fields stay in retained diagnostics, only the dependency
+ * names are derived here.
+ */
+const missingDependency = z.object({
+  __typename__: z.literal("ExtractorDependencyNotFoundReport"),
+  dependencies: z.array(z.string()),
+});
 const region = z.object({
   id: z.string(),
   start_offset: integer,
@@ -79,7 +89,9 @@ const dependencyFailure = z.object({
 
 /** Collect the named extractors from any dependency report nested in one value. */
 const missingDependencies = (value: unknown): string[] => {
-  const found: string[] = [];
+  // Producer-controlled name volume must not make deduplication quadratic;
+  // a Set keeps collection linear and uniqueSorted restores canonical order.
+  const found = new Set<string>();
   const visit = (node: unknown): void => {
     if (Array.isArray(node)) {
       for (const item of node) visit(item);
@@ -88,14 +100,13 @@ const missingDependencies = (value: unknown): string[] => {
     if (typeof node !== "object" || node === null) return;
     const failure = dependencyFailure.safeParse(node);
     if (failure.success) {
-      for (const dependency of failure.data.dependencies)
-        if (!found.includes(dependency)) found.push(dependency);
+      for (const dependency of failure.data.dependencies) found.add(dependency);
       return;
     }
     for (const child of Object.values(node)) visit(child);
   };
   visit(value);
-  return found;
+  return [...found];
 };
 
 /**
@@ -194,6 +205,7 @@ export const normalizeUnblobReport = (
   >();
   const sizes = new Map<string, number>();
   const depths: string[] = [];
+  const failedExtractionStages = new Map<string, string>();
   const diagnostics: JsonValue[] = [];
   const blobOrigins = new Map<string, BlobOrigin>();
   const addBlobOrigin = (
@@ -216,8 +228,44 @@ export const normalizeUnblobReport = (
     handler: string | null;
     encrypted: boolean | null;
     root_file_range: { offset: number; length: number } | null;
+    extraction_failed: boolean;
   }[] = [];
   const seen = new Set<string>();
+  const missingDependencies = new Map<string, Set<string>>();
+  /** Dependencies reported by one chunk's extraction, keyed with its chunk id. */
+  const chunkMissingDependencies = new Map<string, Set<string>>();
+  const dependencyNames = (reports: readonly unknown[]): readonly string[] => {
+    const names = new Set<string>();
+    for (const item of reports) {
+      const parsed = missingDependency.safeParse(item);
+      if (!parsed.success) continue;
+      for (const name of parsed.data.dependencies)
+        if (name !== "") names.add(name);
+    }
+    return [...names];
+  };
+  const noteMissingDependencies = (
+    path: string,
+    reports: readonly unknown[],
+  ): void => {
+    const names = dependencyNames(reports);
+    if (names.length === 0) return;
+    const known = missingDependencies.get(path) ?? new Set<string>();
+    for (const name of names) known.add(name);
+    missingDependencies.set(path, known);
+  };
+  const noteChunkMissingDependencies = (
+    path: string,
+    chunkId: string,
+    reports: readonly unknown[],
+  ): void => {
+    const names = dependencyNames(reports);
+    if (names.length === 0) return;
+    const key = JSON.stringify([path, chunkId]);
+    const known = chunkMissingDependencies.get(key) ?? new Set<string>();
+    for (const name of names) known.add(name);
+    chunkMissingDependencies.set(key, known);
+  };
   for (const record of records) {
     const path = logical(record.task.path);
     if (seen.has(path))
@@ -273,6 +321,7 @@ export const normalizeUnblobReport = (
         diagnostics.push(
           jsonValueSchema.parse({ input_path: path, report: item }),
         );
+      noteMissingDependencies(path, [item]);
       if (
         item.__typename__ === "ChunkReport" ||
         item.__typename__ === "UnknownChunkReport"
@@ -297,8 +346,10 @@ export const normalizeUnblobReport = (
                 })
                 .parse(item)
             : null;
+        const extractionFailed =
+          detail !== null && detail.extraction_reports.length > 0;
         if (detail !== null)
-          for (const problem of detail.extraction_reports)
+          for (const problem of detail.extraction_reports) {
             diagnostics.push(
               extractionDiagnostic(
                 path,
@@ -306,6 +357,9 @@ export const normalizeUnblobReport = (
                 jsonValueSchema.parse(problem),
               ),
             );
+            // Nested under one chunk: keep the owning chunk, not the whole task.
+            noteChunkMissingDependencies(path, parsed.id, [problem]);
+          }
         addBlobOrigin(path, parsed.id, {
           handler: detail?.handler_name ?? null,
           range: { offset: parsed.start_offset, length: parsed.size },
@@ -316,6 +370,7 @@ export const normalizeUnblobReport = (
           range: { offset: parsed.start_offset, length: parsed.size },
           handler: detail?.handler_name ?? null,
           encrypted: detail?.is_encrypted ?? null,
+          extraction_failed: extractionFailed,
           root_file_range:
             path === "$input"
               ? {
@@ -331,7 +386,7 @@ export const normalizeUnblobReport = (
           handler: parsed.handler_name,
           range: null,
         });
-        if (parsed.extraction_reports.length > 0)
+        if (parsed.extraction_reports.length > 0) {
           diagnostics.push(
             extractionDiagnostic(
               path,
@@ -339,6 +394,19 @@ export const normalizeUnblobReport = (
               jsonValueSchema.parse(item),
             ),
           );
+          noteMissingDependencies(path, parsed.extraction_reports);
+          // The stage identity is kept so a failed multi-file extraction can
+          // surface as a recovery row even when no chunk carries the failure.
+          // The report names the blob it extracted; when a subtask carried
+          // that blob, the failure belongs to the child it produced.
+          const derivedChild = record.subtasks.find(
+            (child) => child.blob_id === parsed.id,
+          );
+          failedExtractionStages.set(
+            derivedChild === undefined ? path : logical(derivedChild.path),
+            parsed.handler_name,
+          );
+        }
       }
     }
   }
@@ -403,7 +471,46 @@ export const normalizeUnblobReport = (
     chunks,
     derivations,
     depth_limited_paths: depths.sort(),
+    failed_extraction_stages: [...failedExtractionStages.entries()]
+      .map(([input_path, handler]) => ({ input_path, handler }))
+      .sort((left, right) =>
+        left.input_path < right.input_path
+          ? -1
+          : left.input_path > right.input_path
+            ? 1
+            : 0,
+      ),
     diagnostics,
+    missing_dependencies: [...missingDependencies.entries()]
+      .map(([input_path, names]) => ({
+        input_path,
+        dependencies: uniqueSorted([...names]),
+      }))
+      .sort((left, right) =>
+        left.input_path < right.input_path
+          ? -1
+          : left.input_path > right.input_path
+            ? 1
+            : 0,
+      ),
+    chunk_missing_dependencies: [...chunkMissingDependencies.entries()]
+      .map(([key, names]) => {
+        const [input_path, provider_id] = JSON.parse(key) as [string, string];
+        return {
+          input_path,
+          provider_id,
+          dependencies: uniqueSorted([...names]),
+        };
+      })
+      .sort((left, right) =>
+        `${left.input_path}\u0000${left.provider_id}` <
+        `${right.input_path}\u0000${right.provider_id}`
+          ? -1
+          : `${left.input_path}\u0000${left.provider_id}` >
+              `${right.input_path}\u0000${right.provider_id}`
+            ? 1
+            : 0,
+      ),
     coverage:
       depths.length > 0 ||
       diagnostics.length > 0 ||
