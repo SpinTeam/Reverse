@@ -8,21 +8,6 @@ import {
 } from "./ManagedMetadataLayout.js";
 import { managedFailure } from "./ManagedReaderFailure.js";
 
-const requireRange = (
-  bytes: Buffer,
-  offset: number,
-  length: number,
-  scope: string,
-): void => {
-  if (offset < 0 || length < 0 || offset > bytes.length - length)
-    throw managedFailure(
-      "invalid-row",
-      scope,
-      `${scope} leaves the artifact byte range`,
-      offset >= 0 ? offset : null,
-    );
-};
-
 /** Cursor for checked fixed-width metadata row decoding. */
 export class MetadataRowCursor {
   #offset: number;
@@ -69,23 +54,40 @@ export class MetadataRowCursor {
   }
 }
 
+// Issue code and label for the heap item a compressed length prefixes.
+const PREFIXED_ITEMS = {
+  blob: { code: "invalid-blob", label: "Metadata blob" },
+  userString: { code: "invalid-string", label: "User string" },
+} as const;
+
 const compressedLength = (
   bytes: Buffer,
   offset: number,
   scope: string,
+  item: keyof typeof PREFIXED_ITEMS,
 ): { readonly length: number; readonly prefix: number } => {
-  requireRange(bytes, offset, 1, scope);
+  const { code, label } = PREFIXED_ITEMS[item];
+  const requirePrefix = (size: number): void => {
+    if (offset < 0 || offset > bytes.length - size)
+      throw managedFailure(
+        code,
+        scope,
+        `${label} length prefix leaves the artifact byte range`,
+        offset >= 0 ? offset : null,
+      );
+  };
+  requirePrefix(1);
   const first = bytes[offset] ?? 0;
   if ((first & 0x80) === 0) return { length: first, prefix: 1 };
   if ((first & 0xc0) === 0x80) {
-    requireRange(bytes, offset, 2, scope);
+    requirePrefix(2);
     return {
       length: ((first & 0x3f) << 8) | (bytes[offset + 1] ?? 0),
       prefix: 2,
     };
   }
   if ((first & 0xe0) === 0xc0) {
-    requireRange(bytes, offset, 4, scope);
+    requirePrefix(4);
     return {
       length:
         (first & 0x1f) * 0x01_00_00_00 +
@@ -96,9 +98,9 @@ const compressedLength = (
     };
   }
   throw managedFailure(
-    "invalid-blob",
+    code,
     scope,
-    "Metadata blob uses a reserved compressed-length prefix",
+    `${label} uses a reserved compressed-length prefix`,
     offset,
   );
 };
@@ -172,7 +174,7 @@ export const readMetadataBlob = (
       layout.blob.offset + Math.max(index, 0),
     );
   const start = layout.blob.offset + index;
-  const decoded = compressedLength(bytes, start, "metadata.#Blob");
+  const decoded = compressedLength(bytes, start, "metadata.#Blob", "blob");
   if (decoded.length > heapExtent)
     throw managedFailure(
       "invalid-blob",
@@ -189,6 +191,61 @@ export const readMetadataBlob = (
       start,
     );
   return bytes.subarray(content, content + decoded.length);
+};
+
+/**
+ * Read the #US literal named by an `ldstr` token: a compressed byte length,
+ * UTF-16LE code units, then one ECMA-335 terminal flag byte. Code units are
+ * kept as stored, including unpaired surrogates.
+ */
+export const readMetadataUserString = (
+  bytes: Buffer,
+  layout: ManagedMetadataLayout,
+  token: string,
+): { readonly offset: number; readonly value: string } => {
+  const heap = layout.userStrings;
+  const scope = `metadata.#US:${token}`;
+  if (heap === null)
+    throw managedFailure(
+      "missing-stream",
+      scope,
+      "ldstr references #US, but the metadata has no #US stream",
+    );
+  const index = Number.parseInt(token.slice(4), 16);
+  if (!token.startsWith("0x70") || index >= heap.size)
+    throw managedFailure(
+      "invalid-heap-index",
+      scope,
+      "ldstr operand does not name an item inside #US",
+      token.startsWith("0x70") ? heap.offset + index : null,
+    );
+  const start = heap.offset + index;
+  const decoded = compressedLength(bytes, start, scope, "userString");
+  const content = start + decoded.prefix;
+  if (content > heap.offset + heap.size - decoded.length)
+    throw managedFailure(
+      "invalid-string",
+      scope,
+      "User string leaves #US",
+      start,
+    );
+  if (decoded.length % 2 !== 1)
+    throw managedFailure(
+      "invalid-string",
+      scope,
+      "User string length is not UTF-16 code units plus one terminal flag byte",
+      start,
+    );
+  const units = (decoded.length - 1) / 2;
+  // The terminal flag byte is not validated. Toolchains disagree with
+  // ECMA-335 II.24.2.4 (Mono leaves it 0 for ' and -, Roslyn sets it for any
+  // unit >= 0x80) and the runtime never reads it.
+  // JSON spends at most six bytes per UTF-16 code unit, the same bound as UTF-8 bytes.
+  managedDecodeBudget(layout).reserveString(units, start);
+  return {
+    offset: start,
+    value: bytes.subarray(content, content + units * 2).toString("utf16le"),
+  };
 };
 
 /** Read one conventional GUID value from the one-based #GUID heap. */
