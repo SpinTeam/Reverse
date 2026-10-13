@@ -43,13 +43,19 @@ export const executeProviderOperation = async <
   provider: ProviderOperationPort<TRequest>,
   confidence: "observed" | "derived",
 ): Promise<Result<Evidence, AnalysisError>> => {
-  if (options?.signal?.aborted === true)
+  if (options?.signal?.aborted)
     return err(new AnalysisCancelledError(operation));
   const request = schema.safeParse({ operation, input });
   if (!request.success)
     return err(new AnalysisInputError(operation, { cause: request.error }));
   const executed = await provider.execute(request.data, options);
   if (!executed.ok) return executed;
+  // A provider that cannot observe the signal may finish its work after the
+  // caller cancelled, so re-check rather than reporting a completed operation
+  // the caller no longer wants. The plain truthiness read matches the sibling
+  // services and is not narrowed by the admission check above.
+  if (options?.signal?.aborted)
+    return err(new AnalysisCancelledError(operation));
   const execution = executed.value;
   return ok(
     createEvidence(execution.subject ?? undefined, execution.provider, {
