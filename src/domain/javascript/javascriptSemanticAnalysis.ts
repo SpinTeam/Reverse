@@ -557,6 +557,7 @@ const createState = (
     scopesById: new Map([[root.scopeId, root]]),
     scopeByNode: new WeakMap([[program, root]]),
     bindingsById: new Map(),
+    requiredModuleEffects: new Map(),
     callables: [],
     callableNodesById: new Map(),
     moduleLinks: [],
@@ -1238,7 +1239,7 @@ const createBinding = (
   name,
   kind,
   mutable,
-  mutatedPaths: [],
+  memberWrites: [],
   escapedPaths: [],
   definitions: [],
   initializers: [],
@@ -1258,7 +1259,12 @@ const addAssignment = (
     identifier.name,
     state,
   );
-  if (binding === undefined) return;
+  if (binding === undefined) {
+    // Unbound identifiers can denote host wrapper bindings (such as require),
+    // which are separate from properties written through the global object.
+    state.ambientWrites.retain(["binding", identifier.name]);
+    return;
+  }
   binding.mutable = true;
   binding.definitions.push({ kind: "assignment", location: range(identifier) });
   binding.initializers.push({ node: initializer, projection: [] });

@@ -1,4 +1,8 @@
 import * as t from "@babel/types";
+import {
+  semanticRequireOrigin,
+  semanticRequireExportsIdentity,
+} from "./javascriptSemanticRequireOrigin.js";
 
 import {
   resolveSemanticBindingState,
@@ -49,6 +53,27 @@ export function* collectSemanticMemberMutationsSteps(
   const observablePaths = observableMutationPaths(state);
   const returnedReferences = createSemanticReturnedReferences(state);
   const recordedEffects = new Set<string>();
+  const recordRequiredEffect = (
+    specifier: string,
+    path: PropertyPath,
+    effect: ValueEffect,
+    node: t.Node | undefined,
+  ): void => {
+    const identity = semanticRequireExportsIdentity(specifier, path);
+    const key = JSON.stringify([
+      "required",
+      identity.specifier,
+      effect,
+      identity.path,
+      node?.start,
+      node?.end,
+    ]);
+    if (recordedEffects.has(key)) return;
+    recordedEffects.add(key);
+    const effects = state.requiredModuleEffects.get(identity.specifier) ?? [];
+    effects.push({ path: identity.path, node, kind: effect });
+    state.requiredModuleEffects.set(identity.specifier, effects);
+  };
   const selections = new Map<string, readonly string[]>();
   const coveringPaths = new Map<string, SemanticPropertyPathCoverage>();
   let arrayIterationUnknown = false;
@@ -106,6 +131,19 @@ export function* collectSemanticMemberMutationsSteps(
       const current = pending[cursor];
       if (current === undefined) break;
       const expression = unwrapJavaScriptExpression(current.node).node;
+      const required = semanticRequireOrigin(expression, state);
+      if (required !== undefined) {
+        // Literal built-in requires return one cached exports object. Follow
+        // the captured initializer first so writes after reassignment do not
+        // invalidate an unrelated original module object.
+        recordRequiredEffect(
+          required.origin.specifier,
+          [...required.origin.importedPath, ...current.path],
+          effect,
+          mutation,
+        );
+        continue;
+      }
       if (t.isIdentifier(expression)) {
         const binding = resolveSemanticBindingState(
           state,
@@ -241,7 +279,7 @@ export function* collectSemanticMemberMutationsSteps(
         // only its first write can target a primitive. Re-evaluating it would
         // replay every earlier write and make repeated writes superlinear.
         const value =
-          effect === "write" && binding.mutatedPaths.length === 0
+          effect === "write" && binding.memberWrites.length === 0
             ? evaluateSemanticBinding(binding, state)
             : undefined;
         const primitiveWrite =
@@ -253,9 +291,17 @@ export function* collectSemanticMemberMutationsSteps(
             ? binding
             : semanticMutationInitializers(binding, current.originAt, parents);
         if (!primitiveWrite) {
+          for (const origin of binding.directOrigins)
+            if (origin.resolutionMode === "require")
+              recordRequiredEffect(
+                origin.specifier,
+                [...origin.importedPath, ...path],
+                effect,
+                mutation,
+              );
           if (effect === "escape")
             binding.escapedPaths.push({ path, node: mutation });
-          else binding.mutatedPaths.push(path);
+          else binding.memberWrites.push({ path, node: mutation });
           clearSemanticValueCaches(state);
           for (const initializer of origins.initializers)
             pending.push({
@@ -818,7 +864,10 @@ const observableMutationPaths = (
     }
     // Preserve exact paths where copies, defaults or iteration need their
     // reference-specific projections; an opaque origin prevents pruning.
-    if (binding.referenceInitializers.length > 0)
+    if (
+      binding.referenceInitializers.length > 0 ||
+      binding.directOrigins.length > 0
+    )
       (observer.origins ??= new Set()).add("opaque");
     for (const initializer of binding.referenceInitializers) {
       for (const source of [
@@ -835,6 +884,11 @@ const observableMutationPaths = (
         const selected = pendingExpressions.pop();
         if (selected === undefined) break;
         const { expression, observer } = selected;
+        if (semanticRequireOrigin(expression, state) !== undefined) {
+          (observer.origins ??= new Set()).add("opaque");
+          schedule(observer);
+          continue;
+        }
         // Keep class/getter projections distinct so cycle pruning does not
         // discard observable escapes through a shared getter result.
         if (

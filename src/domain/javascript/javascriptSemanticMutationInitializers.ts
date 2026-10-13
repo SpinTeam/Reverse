@@ -42,6 +42,28 @@ const positionPrecedes = (
       left.declaratorIndex >= 0 &&
       left.declaratorIndex < right.declaratorIndex));
 
+/** Order effects only in a non-repeating top-level activation. */
+export const semanticTopLevelEffectFollowsCapture = (
+  capture: t.Node,
+  effect: t.Node | undefined,
+  parents: WeakMap<t.Node, t.Node>,
+): boolean => {
+  const position = (node: t.Node | undefined): StatementPosition | null => {
+    let selected: StatementPosition | null = null;
+    while (node !== undefined) {
+      if (t.isFunction(node) || t.isLoop(node)) return null;
+      if (selected === null && t.isStatement(node))
+        selected = statementPosition(node, parents);
+      if (t.isProgram(node)) return selected;
+      node = parents.get(node);
+    }
+    return null;
+  };
+  const before = position(capture);
+  const after = position(effect);
+  return before !== null && after !== null && positionPrecedes(before, after);
+};
+
 const directInitializerPosition = (
   node: t.Node,
   parents: WeakMap<t.Node, t.Node>,

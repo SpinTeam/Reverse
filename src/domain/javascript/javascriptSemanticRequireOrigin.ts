@@ -47,7 +47,8 @@ export const semanticRequireOrigin = (
   if (
     resolveSemanticBindingState(state, current.callee, "require") !==
       undefined ||
-    semanticResolutionBlocked(state, current.callee, "require")
+    semanticResolutionBlocked(state, current.callee, "require") ||
+    state.ambientWrites.covers(["binding", "require"])
   )
     return undefined;
   const specifier = stringValue(current.arguments[0]);
@@ -61,4 +62,15 @@ export const semanticRequireOrigin = (
         },
         call: current,
       };
+};
+
+/** Node's fs.promises export and fs/promises require share one object. */
+export const semanticRequireExportsIdentity = <Key>(
+  specifier: string,
+  path: readonly Key[],
+): { readonly specifier: string; readonly path: readonly (Key | string)[] } => {
+  const name = specifier.replace(/^node:/u, "");
+  return name === "fs/promises"
+    ? { specifier: "fs", path: ["promises", ...path] }
+    : { specifier: name, path };
 };
