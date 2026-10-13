@@ -165,7 +165,8 @@ static Handle createRelative(HANDLE parent, const std::wstring& name, DWORD acce
   IO_STATUS_BLOCK observation{};
   HANDLE raw = INVALID_HANDLE_VALUE;
   const auto status = NtCreateFile(&raw, access | SYNCHRONIZE, &attributes, &observation, nullptr,
-                                   FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_CREATE,
+                                   FILE_ATTRIBUTE_NORMAL,
+                                   FILE_SHARE_READ | FILE_SHARE_DELETE, FILE_CREATE,
                                    FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_REPARSE_POINT |
                                    (directory ? FILE_DIRECTORY_FILE : FILE_NON_DIRECTORY_FILE), nullptr, 0);
   if (status < 0) throw Failure("Create private object relative to its admitted parent failed", path,
@@ -369,7 +370,7 @@ void closeRuntime(Runtime& root) {
     if (name == L"." || name == L"..") continue;
     const auto path = frame.path + L"\\" + name;
     Handle child(CreateFileW((L"\\\\?\\" + path).c_str(), DELETE | GENERIC_READ | FILE_WRITE_ATTRIBUTES,
-                            FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                            FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
                             FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr));
     require(child.valid(), "Open owned cleanup object failed", path);
     FILE_ATTRIBUTE_TAG_INFO info{};
