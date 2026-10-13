@@ -1,6 +1,9 @@
+import { MIMEType } from "node:util";
+import { createIdaDiagnosticRedactor } from "./IdaDiagnosticRedactor.js";
 import { snapshotEnvironment } from "../process/snapshotEnvironment.js";
 import {
   Client,
+  SdkHttpError,
   StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/client";
 import {
@@ -60,18 +63,23 @@ const parseIdaJsonText = (text: string): JsonValue => {
 export const decodeIdaToolResult = (
   input: unknown,
   protocol?: "native",
+  redactDiagnostic: (message: string) => string = (message) => message,
 ): JsonValue => {
   const result = toolResultSchema.parse(input);
   const blocks = result.content.flatMap((block) =>
     block.type === "text" && block.text !== undefined ? [block.text] : [],
   );
-  if (result.isError === true)
-    throw new AnalysisProtocolError(
-      `IDA MCP tool failed: ${blocks.join("\n")}`,
-    );
+  if (result.isError === true) {
+    const reason = redactDiagnostic(blocks.join("\n"));
+    throw new AnalysisProtocolError(`IDA MCP tool failed: ${reason}`, {
+      diagnostics: { reason },
+    });
+  }
   if (result._meta?.ida_mcp?.output_truncated === true)
     throw new AnalysisProtocolError(
-      `IDA MCP truncated its output; the preview cannot establish a complete observation. ${result._meta.ida_mcp.download_hint ?? "Use the upstream output download workflow to retrieve the full result."}`,
+      redactDiagnostic(
+        `IDA MCP truncated its output; the preview cannot establish a complete observation. ${result._meta.ida_mcp.download_hint ?? "Use the upstream output download workflow to retrieve the full result."}`,
+      ),
     );
   // Native MCP retains the complete JSON text while structuredContent may
   // contain a shortened preview. Parse that producer-owned representation once.
@@ -104,29 +112,15 @@ export const decodeIdaToolResult = (
   return values[0] ?? null;
 };
 
-/** Redact configured transport authentication values from SDK diagnostics only. */
-export const redactIdaTransportFailure = (
-  cause: unknown,
-  config: IdaConfiguration,
-): Error => {
-  let message =
-    cause instanceof Error
-      ? cause.message
-      : "Unknown IDA MCP transport failure";
-  if ("headers" in config) {
-    for (const [name, value] of Object.entries(config.headers)) {
-      if (!/^(?:authorization|proxy-authorization|cookie)$/iu.test(name))
-        continue;
-      const credential = value.match(/^(?:Bearer|Basic)\s+([\s\S]+)$/iu)?.[1];
-      for (const secret of [value, credential])
-        if (secret !== undefined && secret.length > 0)
-          message = message
-            .split(secret)
-            .join("[redacted transport credential]");
-    }
+// Preserve the HTTP body at its decoding boundary. Native SyntaxError messages
+// add display quoting/truncation and cannot recover the original JSON tokens.
+class IdaHttpJsonError extends Error {
+  readonly text: string;
+  constructor(text: string, cause: unknown) {
+    super("IDA MCP returned malformed HTTP JSON.", { cause });
+    this.text = text;
   }
-  return new Error(message, { cause });
-};
+}
 
 /** Create a standard SDK connection to an existing upstream registration. */
 export const createIdaMcpConnection = (
@@ -134,8 +128,25 @@ export const createIdaMcpConnection = (
   environment: Readonly<NodeJS.ProcessEnv>,
 ): IdaMcpConnection => {
   const client = new Client({ name: "rea-ida-provider", version: "1" });
+  const redactor = createIdaDiagnosticRedactor(config);
   const transportFailure = (cause: unknown): never => {
-    throw redactIdaTransportFailure(cause, config);
+    if (cause instanceof IdaHttpJsonError)
+      throw new Error(
+        `${cause.message} Response body: ${redactor.json(cause.text, { malformed: true })}`,
+        { cause },
+      );
+    const message =
+      cause instanceof Error
+        ? cause.message
+        : "Unknown IDA MCP transport failure";
+    const body = cause instanceof SdkHttpError ? cause.data.text : undefined;
+    // The fetch boundary already sanitized this body using its Content-Type.
+    // Redact only the surrounding SDK message; never rescan replacement markers.
+    const safeMessage =
+      typeof body === "string" && body.length > 0 && message.includes(body)
+        ? message.split(body).map(redactor.text).join(body)
+        : redactor.text(message);
+    throw new Error(safeMessage, { cause });
   };
   const transport =
     "command" in config
@@ -160,6 +171,43 @@ export const createIdaMcpConnection = (
         })
       : new StreamableHTTPClientTransport(new URL(config.url), {
           requestInit: { headers: config.headers, redirect: "error" },
+          fetch: async (input, init) => {
+            const response = await fetch(input, init);
+            const readText = response.text.bind(response);
+            if (!response.ok) {
+              let redactBody = redactor.text;
+              const contentType = response.headers.get("content-type");
+              if (contentType !== null) {
+                try {
+                  const { subtype } = new MIMEType(contentType);
+                  if (subtype === "json" || subtype.endsWith("+json"))
+                    redactBody = redactor.json;
+                } catch {
+                  // An unknown format provides no JSON interpretation.
+                }
+              }
+              // The SDK retains text but drops response headers when making
+              // its HTTP error. Apply the known format before that boundary.
+              Object.defineProperty(response, "text", {
+                value: async (): Promise<string> =>
+                  redactBody(await readText()),
+              });
+            }
+            // Read once, only when the SDK requests JSON. Other response
+            // consumers, including SSE, keep their transport semantics.
+            Object.defineProperty(response, "json", {
+              value: async (): Promise<unknown> => {
+                const text = await readText();
+                try {
+                  const value: unknown = JSON.parse(text);
+                  return value;
+                } catch (cause: unknown) {
+                  throw new IdaHttpJsonError(text, cause);
+                }
+              },
+            });
+            return response;
+          },
         });
   // Drain proxy diagnostics without persisting ambient environment or transport credentials.
   if (transport instanceof StdioClientTransport)
@@ -182,6 +230,7 @@ export const createIdaMcpConnection = (
           .callTool({ name, arguments: args }, { timeout: config.timeoutMs })
           .catch(transportFailure),
         config.protocol,
+        redactor.text,
       );
     },
     async readResource(uri) {

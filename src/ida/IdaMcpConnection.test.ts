@@ -1,31 +1,63 @@
 import { describe, expect, it } from "vitest";
-import {
-  decodeIdaToolResult,
-  redactIdaTransportFailure,
-} from "./IdaMcpConnection.js";
+import { decodeIdaToolResult } from "./IdaMcpConnection.js";
+import { createIdaDiagnosticRedactor } from "./IdaDiagnosticRedactor.js";
 
 describe("upstream IDA tool result decoding", () => {
-  it("redacts configured transport authentication without redacting caller evidence", () => {
-    const error = redactIdaTransportFailure(
-      new Error(
-        "Invalid Authorization value Bearer fixture-secret at /caller/input",
-      ),
-      {
-        url: "http://127.0.0.1:12345/mcp",
-        headers: { Authorization: "Bearer fixture-secret" },
-        mode: "attached",
-        timeoutMs: 1000,
-      },
-    );
-    expect(error.message).not.toContain("fixture-secret");
-    expect(error.message).toContain("/caller/input");
+  it("leaves successful legacy, structured, and native evidence unchanged", () => {
+    const redact = createIdaDiagnosticRedactor({
+      url: "http://127.0.0.1:12345/mcp",
+      headers: { Authorization: "Bearer fixture-secret" },
+      mode: "attached",
+      timeoutMs: 1000,
+    }).text;
+    const evidence = "Caller-selected fixture-secret evidence";
     expect(
-      decodeIdaToolResult({
-        content: [
-          { type: "text", text: "Caller-selected fixture-secret evidence" },
-        ],
-      }),
-    ).toBe("Caller-selected fixture-secret evidence");
+      decodeIdaToolResult(
+        { content: [{ type: "text", text: evidence }] },
+        undefined,
+        redact,
+      ),
+    ).toBe(evidence);
+    expect(
+      decodeIdaToolResult(
+        { content: [], structuredContent: { evidence } },
+        undefined,
+        redact,
+      ),
+    ).toEqual({ evidence });
+    expect(
+      decodeIdaToolResult(
+        { content: [{ type: "text", text: JSON.stringify({ evidence }) }] },
+        "native",
+        redact,
+      ),
+    ).toEqual({ evidence });
+  });
+  it("redacts credentials in truncated-output diagnostics before constructing the error", () => {
+    const redact = createIdaDiagnosticRedactor({
+      url: "http://127.0.0.1:12345/mcp",
+      headers: { Authorization: "Bearer fixture-secret" },
+      mode: "attached",
+      timeoutMs: 1000,
+    }).text;
+    expect(() =>
+      decodeIdaToolResult(
+        {
+          content: [],
+          _meta: {
+            ida_mcp: {
+              output_truncated: true,
+              download_hint:
+                "Download /caller/output?cursor=kept using Bearer fixture-secret",
+            },
+          },
+        },
+        undefined,
+        redact,
+      ),
+    ).toThrow(
+      "Download /caller/output?cursor=kept using [redacted transport credential]",
+    );
   });
   it("decodes scalar wrappers and legacy text without dropping structured dictionaries", () => {
     expect(
