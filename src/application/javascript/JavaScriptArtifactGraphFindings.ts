@@ -266,6 +266,7 @@ const addDiscoveredRole = (
     sourcePath: input.file.path,
     context: input.value.resolution_context,
     files: context.filesByPath,
+    unanalyzedFiles: context.unanalyzedFilesByPath,
   });
   const role = createElectronRoleNode(context, {
     kind:
@@ -313,6 +314,7 @@ const addSourceMapEdge = (
     sourcePath: input.file.path,
     context: "url-reference",
     files: context.filesByPath,
+    unanalyzedFiles: context.unanalyzedFilesByPath,
   }).resolved_path;
   const resolvedFile =
     resolvedPath === null ? undefined : context.filesByPath.get(resolvedPath);
@@ -401,6 +403,7 @@ const resolveReference = (
         sourcePath,
         context: "url-reference",
         files: context.filesByPath,
+        unanalyzedFiles: context.unanalyzedFilesByPath,
       }).resolved_path
     : resolveArtifactPath(
         specifier,

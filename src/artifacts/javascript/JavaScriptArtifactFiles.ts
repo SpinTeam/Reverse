@@ -24,6 +24,7 @@ import type {
   JavaScriptArtifactFileKind,
   JavaScriptArtifactFile,
   JavaScriptArtifactContainer,
+  JavaScriptUnanalyzedArtifactFile,
   JavaScriptArtifactFileSet,
 } from "../../domain/javascript/javascriptArtifactFiles.js";
 
@@ -33,6 +34,13 @@ interface ExpectedFile {
   readonly bytes: number;
   readonly inventoryArtifactId: string;
   readonly kind: JavaScriptArtifactFileKind;
+}
+
+/** Inventoried regular file outside the relevant kinds; recorded, never read. */
+interface UnanalyzedFile {
+  readonly sha256: string;
+  readonly bytes: number;
+  readonly inventoryArtifactId: string;
 }
 
 interface ExpectedContainer {
@@ -46,6 +54,8 @@ interface ReadContext {
   readonly expectedContainers: ReadonlyMap<string, ExpectedContainer>;
   readonly registry: ArtifactPathRegistry;
   readonly files: JavaScriptArtifactFile[];
+  readonly unanalyzedExpected: ReadonlyMap<string, UnanalyzedFile>;
+  readonly unanalyzed: JavaScriptUnanalyzedArtifactFile[];
   readonly containers: JavaScriptArtifactContainer[];
   readonly signal: AbortSignal | undefined;
   readonly selectedPaths: ReadonlyMap<string, number> | undefined;
@@ -123,6 +133,8 @@ export const readJavaScriptArtifactFiles = async (
     expectedContainers: inventory.containers,
     registry: new ArtifactPathRegistry(),
     files: [],
+    unanalyzedExpected: inventory.unanalyzedFiles,
+    unanalyzed: [],
     containers: [],
     signal,
     selectedPaths,
@@ -139,6 +151,9 @@ export const readJavaScriptArtifactFiles = async (
   assertExpectedFilesWereVisited(expected, files);
   return {
     files,
+    unanalyzed_files: context.unanalyzed.sort((left, right) =>
+      compareUnicodeCodePoints(left.path, right.path),
+    ),
     containers: context.containers.sort((left, right) =>
       compareUnicodeCodePoints(left.path, right.path),
     ),
@@ -243,7 +258,18 @@ const visitReader = async (
         continue;
       }
       const expected = context.expected.get(path);
-      if (expected === undefined) continue;
+      if (expected === undefined) {
+        const unanalyzed = context.unanalyzedExpected.get(path);
+        if (unanalyzed !== undefined && entry.kind === "file")
+          context.unanalyzed.push({
+            path,
+            container_sha256: frame.containerSha256,
+            sha256: unanalyzed.sha256,
+            bytes: unanalyzed.bytes,
+            inventory_artifact_id: unanalyzed.inventoryArtifactId,
+          });
+        continue;
+      }
       const text = await readText(context, {
         reader: frame.reader,
         entry,
@@ -376,11 +402,13 @@ const expectedInventory = (
   readonly files: ReadonlyMap<string, ExpectedFile>;
   readonly containers: ReadonlyMap<string, ExpectedContainer>;
   readonly unavailableFiles: ReadonlySet<string>;
+  readonly unanalyzedFiles: ReadonlyMap<string, UnanalyzedFile>;
 } => {
   const nodes = new Map(snapshot.nodes.map((node) => [node.artifact_id, node]));
   const files = new Map<string, ExpectedFile>();
   const containers = new Map<string, ExpectedContainer>();
   const unavailableFiles = new Set<string>();
+  const unanalyzedFiles = new Map<string, UnanalyzedFile>();
   for (const occurrence of snapshot.occurrences) {
     if (occurrence.logical_path === ".") continue;
     const isNestedAsar =
@@ -420,7 +448,17 @@ const expectedInventory = (
         },
       });
     const kind = relevantKind(occurrence.logical_path);
-    if (kind === undefined) continue;
+    if (kind === undefined) {
+      // Keep the inventory identity so references can report present bytes
+      // as unanalyzed instead of absent. Nested ASARs are containers above.
+      if (!isNestedAsar)
+        unanalyzedFiles.set(occurrence.logical_path, {
+          sha256: node.sha256,
+          bytes: node.size,
+          inventoryArtifactId: node.artifact_id,
+        });
+      continue;
+    }
     files.set(occurrence.logical_path, {
       path: occurrence.logical_path,
       sha256: node.sha256,
@@ -429,7 +467,7 @@ const expectedInventory = (
       kind,
     });
   }
-  return { files, containers, unavailableFiles };
+  return { files, containers, unavailableFiles, unanalyzedFiles };
 };
 
 const readAll = async (

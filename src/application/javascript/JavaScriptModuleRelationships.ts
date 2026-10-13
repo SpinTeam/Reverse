@@ -287,6 +287,7 @@ const resolveModuleTarget = (
     sourcePath: input.file.path,
     context: "module-specifier",
     files: input.context.filesByPath,
+    unanalyzedFiles: input.context.unanalyzedFilesByPath,
     moduleKind: moduleKindForJavaScriptReference(
       input.file.path,
       input.link.kind === "require" || input.link.kind === "commonjs-export"

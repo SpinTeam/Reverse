@@ -5,7 +5,10 @@ import {
   normalizeJoinedLogicalPath,
   logicalPathEscapesRoot,
 } from "../../domain/artifactIdentity.js";
-import type { JavaScriptArtifactFile } from "../../domain/javascript/javascriptArtifactFiles.js";
+import type {
+  JavaScriptArtifactFile,
+  JavaScriptUnanalyzedArtifactFile,
+} from "../../domain/javascript/javascriptArtifactFiles.js";
 import {
   admitsCanonicalPathSyntax,
   hasScheme,
@@ -60,6 +63,11 @@ export interface ResolveArtifactPathInput {
   readonly sourcePath: string;
   readonly context: ArtifactPathResolutionContext;
   readonly files: ReadonlyMap<string, JavaScriptArtifactFile>;
+  /** Inventoried files outside the JavaScript projection: present, never read. */
+  readonly unanalyzedFiles?: ReadonlyMap<
+    string,
+    JavaScriptUnanalyzedArtifactFile
+  >;
   readonly htmlBaseHref?: string | null;
   /** Import/require semantics; runtime resource paths omit this provenance. */
   readonly moduleKind?: "import" | "require";
@@ -905,6 +913,9 @@ const resolveDirectory = (
     sourcePath: metadata.path,
     context: "package-entrypoint",
     files: input.files,
+    ...(input.unanalyzedFiles === undefined
+      ? {}
+      : { unanalyzedFiles: input.unanalyzedFiles }),
     ...(input.moduleKind === undefined ? {} : { moduleKind: input.moduleKind }),
   };
   const candidate = contextualCandidate(entryInput);
@@ -941,6 +952,18 @@ const resolveFileCandidates = (
         target.container_sha256 === source.container_sha256)
     )
       return { resolvedPath: path, status: "resolved", limitations: [] };
+    // The candidate exists, but outside the files this analysis reads. Report
+    // its inventory identity instead of letting the lookup fall through to
+    // "not-found", which would state that present bytes are absent.
+    const unanalyzed = input.unanalyzedFiles?.get(path);
+    if (
+      unanalyzed !== undefined &&
+      (source === undefined ||
+        unanalyzed.container_sha256 === source.container_sha256)
+    )
+      return unresolvedCandidate("unavailable", [
+        `${path} exists in the inventoried artifact container (sha256 ${unanalyzed.sha256}, ${String(unanalyzed.bytes)} bytes) but is not a JavaScript, JSON, HTML, source map, or native add-on file; its contents were not analyzed.`,
+      ]);
   }
   return null;
 };

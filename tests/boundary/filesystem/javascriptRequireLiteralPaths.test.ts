@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join, relative, sep } from "node:path";
@@ -132,4 +133,50 @@ describe("literal CommonJS paths in application graphs", () => {
       });
     },
   );
+});
+
+describe("present require targets outside the JavaScript projection", () => {
+  it("reports an existing bytenode .jsc target as unavailable, not as absent", async () => {
+    const present = await createTestTempDirectory("rea-unanalyzed-present-");
+    const absent = await createTestTempDirectory("rea-unanalyzed-absent-");
+    const main =
+      'require("bytenode");\nconst core = require("./core.jsc");\nmodule.exports = { core };';
+    // Bytes stand in for V8 bytecode; the projection never reads them.
+    const bytecode = Buffer.from([0xde, 0xc0, 0x17, 0x0b, 0x00, 0x01, 0x02]);
+    await Promise.all([
+      writeFile(join(present, "main.cjs"), main),
+      writeFile(join(present, "core.jsc"), bytecode),
+      writeFile(join(absent, "main.cjs"), main),
+    ]);
+    const edgeFor = async (root: string) => {
+      const { graph } = await analyze(root);
+      const edge = graph.edges.find(
+        ({ properties }) =>
+          properties.specifier === "./core.jsc" &&
+          properties.module_link_kind === "require",
+      );
+      expect(edge).toBeDefined();
+      return edge!;
+    };
+
+    const presentEdge = await edgeFor(present);
+    expect(presentEdge.properties).toMatchObject({
+      resolution_status: "unavailable",
+      resolved_path: null,
+    });
+    const sha256 = createHash("sha256").update(bytecode).digest("hex");
+    expect(presentEdge.evidence.limitations).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          `core.jsc exists in the inventoried artifact container (sha256 ${sha256}, ${String(bytecode.length)} bytes)`,
+        ),
+      ]),
+    );
+
+    const absentEdge = await edgeFor(absent);
+    expect(absentEdge.properties).toMatchObject({
+      resolution_status: "not-found",
+      resolved_path: null,
+    });
+  });
 });

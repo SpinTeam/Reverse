@@ -11,6 +11,7 @@ import type { JavaScriptSourceRange } from "../../domain/javascript/javascriptSt
 import type { JavaScriptModuleArtifactAnalysis } from "./JavaScriptArtifactAnalysisTypes.js";
 import type {
   JavaScriptArtifactFile,
+  JavaScriptUnanalyzedArtifactFile,
   JavaScriptArtifactFileSet,
   JavaScriptArtifactFileKind,
 } from "../../domain/javascript/javascriptArtifactFiles.js";
@@ -34,6 +35,11 @@ export interface JavaScriptArtifactGraphContext {
   readonly analysis: JavaScriptModuleArtifactAnalysis;
   readonly root: ApplicationNode;
   readonly filesByPath: ReadonlyMap<string, JavaScriptArtifactFile>;
+  /** Present inventoried files the projection does not read, keyed by path. */
+  readonly unanalyzedFilesByPath: ReadonlyMap<
+    string,
+    JavaScriptUnanalyzedArtifactFile
+  >;
   readonly fileNodes: Map<string, ApplicationNode>;
   readonly assetNodes: Map<string, ApplicationNode>;
   readonly sourceModuleNodes: Map<string, ApplicationNode>;

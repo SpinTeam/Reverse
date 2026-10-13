@@ -97,6 +97,9 @@ function* buildJavaScriptArtifactGraphInputSteps(
     analysis,
     root,
     filesByPath: new Map(fileSet.files.map((file) => [file.path, file])),
+    unanalyzedFilesByPath: new Map(
+      (fileSet.unanalyzed_files ?? []).map((file) => [file.path, file]),
+    ),
     fileNodes: new Map(),
     assetNodes: new Map(),
     sourceModuleNodes: new Map(),
