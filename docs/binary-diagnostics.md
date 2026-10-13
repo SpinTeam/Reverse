@@ -17,6 +17,8 @@ REA_PWNTOOLS_PYTHON=/absolute/isolated-env/bin/python \
   rea inspect-binary-layout ./selected.elf --json
 ```
 
+Larger ELF artifacts exceeding the default 32 MiB input budget can be analyzed by setting `REA_PWNTOOLS_MAX_INPUT_BYTES`.
+
 ```json
 {
   "name": "inspect_binary_layout",

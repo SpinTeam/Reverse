@@ -8,6 +8,9 @@ export REA_PWNTOOLS_PYTHON=/absolute/existing/venv/bin/python
 rea inspect-recorded-crash ./crash.core --json
 ```
 
+Optionally set `REA_PWNTOOLS_MAX_INPUT_BYTES` (e.g. `268435456` for 256 MiB)
+to analyze crash cores exceeding the default 32 MiB input budget.
+
 The selected Python needs unchanged pwntools 4.15.0, pyelftools 0.33 and Unicorn 2.1.2.
 REA does not install these dependencies. ELFFile/its original ELF structures and
 pwntools' original Linux amd64 ctypes provide parsing and ABI layout. The adapter
