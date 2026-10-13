@@ -1,6 +1,6 @@
 <div align="center">
 
-**English** · [简体中文](README_zh.md) · [繁體中文](README_zh-TW.md) · [日本語](README_ja.md) · [한국어](README_ko.md) · [Türkçe](README_tr.md) · [Русский](README_ru.md) · [Tiếng Việt](README_vi.md) · [ไทย](README_th.md) · [Deutsch](README_de.md) · [Español](README_es.md) · [Français](README_fr.md) · [Українська](README_uk.md) · [Polski](README_pl.md) · [Português (Brasil)](README_pt-BR.md) · [العربية](README_ar.md) · [فارسی](README_fa.md) · [Bahasa Indonesia](README_id.md) · [Italiano](README_it.md)
+**English** · [简体中文](docs/readmes/README_zh.md) · [繁體中文](docs/readmes/README_zh-TW.md) · [日本語](docs/readmes/README_ja.md) · [한국어](docs/readmes/README_ko.md) · [Türkçe](docs/readmes/README_tr.md) · [Русский](docs/readmes/README_ru.md) · [Tiếng Việt](docs/readmes/README_vi.md) · [ไทย](docs/readmes/README_th.md) · [Deutsch](docs/readmes/README_de.md) · [Español](docs/readmes/README_es.md) · [Français](docs/readmes/README_fr.md) · [Українська](docs/readmes/README_uk.md) · [Polski](docs/readmes/README_pl.md) · [Português (Brasil)](docs/readmes/README_pt-BR.md) · [العربية](docs/readmes/README_ar.md) · [فارسی](docs/readmes/README_fa.md) · [Bahasa Indonesia](docs/readmes/README_id.md) · [Italiano](docs/readmes/README_it.md)
 
 # REA: Reverse Engineer Anything
 

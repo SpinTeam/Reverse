@@ -178,10 +178,10 @@ describe("canonical product catalog drift", () => {
     temporaryRoots.push(directory);
     const paths = [
       "README.md",
-      "README_zh.md",
-      "README_ja.md",
-      "README_ko.md",
-      "README_ar.md",
+      "docs/readmes/README_zh.md",
+      "docs/readmes/README_ja.md",
+      "docs/readmes/README_ko.md",
+      "docs/readmes/README_ar.md",
       "website/locales/languages.json",
       "docs/installation.md",
       "AGENTS.md",
@@ -195,7 +195,7 @@ describe("canonical product catalog drift", () => {
     await mkdir(join(directory, "skills/reverse-engineer-anything"), {
       recursive: true,
     });
-    const translatedPath = join(directory, "README_zh.md");
+    const translatedPath = join(directory, "docs/readmes/README_zh.md");
     const translated = await readFile(translatedPath, "utf8");
     const catalog = await createProductCatalog(root);
     await expect(documentationFactIssues(directory, catalog)).resolves.toEqual(
@@ -203,8 +203,8 @@ describe("canonical product catalog drift", () => {
     );
     for (const [original, changed] of [
       [
-        "(docs/installation.md#supported-agents)",
-        "(docs/installation.md#missing-agents)",
+        "(../installation.md#supported-agents)",
+        "(../installation.md#missing-agents)",
       ],
       [
         "https://rea.tools/zh-CN/guides/native/",
@@ -228,7 +228,7 @@ describe("canonical product catalog drift", () => {
       await expect(
         documentationFactIssues(directory, catalog),
       ).resolves.toEqual([
-        "README_zh.md: documentation links differ from README.md",
+        "docs/readmes/README_zh.md: documentation links differ from README.md",
       ]);
     }
   });

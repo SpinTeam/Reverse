@@ -1,13 +1,39 @@
 import { readFile, readdir, stat } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import {
+  dirname,
+  isAbsolute,
+  join,
+  posix,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 
-const readmeLinkTargets = (content, language = "en") =>
+const readmeEditionPattern =
+  /^(?:docs\/readmes\/)?README(?:_[A-Za-z0-9-]+)?\.md$/u;
+
+/** Resolve a local link against the README that contains it, so editions in docs/readmes compare with the root README. */
+const rootRelativeTarget = (from, target) => {
+  const hash = target.indexOf("#");
+  const file = hash === -1 ? target : target.slice(0, hash);
+  if (file === "") return target;
+  return (
+    posix.normalize(posix.join(posix.dirname(from), file)) +
+    (hash === -1 ? "" : target.slice(hash))
+  );
+};
+
+const readmeLinkTargets = (from, content, language = "en") =>
   [...content.matchAll(/\]\(([^)\s]+)\)/gu)]
     .map((match) => match[1] ?? "")
+    .filter((target) => !target.startsWith("#"))
     .filter(
       (target) =>
-        !target.startsWith("#") &&
-        !/^README(?:_[A-Za-z0-9-]+)?\.md$/u.test(target),
+        URL.canParse(target) ||
+        !readmeEditionPattern.test(rootRelativeTarget(from, target)),
+    )
+    .map((target) =>
+      URL.canParse(target) ? target : rootRelativeTarget(from, target),
     )
     .map((target) => {
       if (language === "en" || !URL.canParse(target)) return target;
@@ -70,9 +96,10 @@ export const documentationFactIssues = async (root, catalog) => {
   const issues = await skillReferenceIssues(
     join(root, "skills/reverse-engineer-anything"),
   );
-  const readmePaths = (await readdir(root))
-    .filter((path) => /^README(?:_[A-Za-z0-9-]+)?\.md$/u.test(path))
-    .sort();
+  const translatedReadmes = (await readdir(join(root, "docs/readmes")))
+    .filter((path) => /^README_[A-Za-z0-9-]+\.md$/u.test(path))
+    .map((path) => `docs/readmes/${path}`);
+  const readmePaths = ["README.md", ...translatedReadmes].sort();
   const readmes = new Map();
   for (const path of readmePaths) {
     const content = await readFile(join(root, path), "utf8");
@@ -94,7 +121,10 @@ export const documentationFactIssues = async (root, catalog) => {
       );
     }
   }
-  const canonicalLinks = readmeLinkTargets(readmes.get("README.md") ?? "");
+  const canonicalLinks = readmeLinkTargets(
+    "README.md",
+    readmes.get("README.md") ?? "",
+  );
   const languageInventory = JSON.parse(
     await readFile(join(root, "website/locales/languages.json"), "utf8"),
   );
@@ -104,7 +134,11 @@ export const documentationFactIssues = async (root, catalog) => {
   for (const path of readmePaths.filter((path) => path !== "README.md"))
     if (
       JSON.stringify(
-        readmeLinkTargets(readmes.get(path) ?? "", readmeLanguages.get(path)),
+        readmeLinkTargets(
+          path,
+          readmes.get(path) ?? "",
+          readmeLanguages.get(path),
+        ),
       ) !== JSON.stringify(canonicalLinks)
     )
       issues.push(`${path}: documentation links differ from README.md`);

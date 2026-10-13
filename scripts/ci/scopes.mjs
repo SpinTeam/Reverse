@@ -307,6 +307,7 @@ export const SCOPES = {
     "website/**",
     "scripts/*website*.py",
     "README*.md",
+    "docs/readmes/README*.md",
     ".github/workflows/website-check.yml",
     ".github/workflows/website-pages.yml",
   ],

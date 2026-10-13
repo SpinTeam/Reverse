@@ -125,7 +125,7 @@ if (
     .filter(Boolean);
   for (const file of files) {
     if (
-      /^(README(?:_[^/]+)?\.md|AGENTS\.md|CONTRIBUTING\.md|CHANGELOG\.md|SECURITY\.md|native\/windows\/README\.md|\.github\/pull_request_template\.md)$/.test(
+      /^(README\.md|AGENTS\.md|CONTRIBUTING\.md|CHANGELOG\.md|SECURITY\.md|native\/windows\/README\.md|\.github\/pull_request_template\.md)$/.test(
         file,
       ) ||
       file.startsWith("docs/") ||

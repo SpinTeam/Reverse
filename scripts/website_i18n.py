@@ -25,11 +25,16 @@ LITERALS = {"REA", "Reverse Engineer Anything", "REA · Reverse Engineer Anythin
 FALLBACK_NOTICE = "Translation is being updated. Read this page in English for now."
 
 
+def readme_editions(root):
+    """Return root-relative README editions: English at the root, translations in docs/readmes."""
+    return {"README.md"} | {f"docs/readmes/{path.name}" for path in (root / "docs/readmes").glob("README_*.md")}
+
+
 def languages(root):
     """Load the website language inventory and check it against README editions."""
     path = root / "website/locales/languages.json"
     if not path.exists():
-        if any(root.glob("README_*.md")):
+        if len(readme_editions(root)) > 1:
             raise ValueError("Missing languages.json for the translated README editions")
         return [{"code": "en", "name": "English", "readme": "README.md", "dir": "ltr"}]
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -49,8 +54,7 @@ def languages(root):
             raise ValueError(f"Duplicate README edition: {item['readme']}")
         codes.add(item["code"])
         filenames.add(item["readme"])
-    readmes = {path.name for path in root.glob("README*.md")}
-    if readmes and ({item["readme"] for item in data} != readmes):
+    if {item["readme"] for item in data} != readme_editions(root):
         raise ValueError("Website languages must match the README language editions")
     return data
 
