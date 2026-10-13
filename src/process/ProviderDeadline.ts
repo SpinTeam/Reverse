@@ -23,7 +23,7 @@ export const waitForAbortableDelay = (
 };
 
 /**
- * One absolute deadline shared by every phase of a provider startup handshake.
+ * One monotonic deadline shared by every phase of a provider startup handshake.
  *
  * The deadline owns its timer and the listener attached to an optional caller
  * signal. Adapters must dispose it after startup succeeds or fails.
@@ -42,11 +42,11 @@ export class ProviderStartupDeadline {
   ) {
     if (!Number.isFinite(timeoutMs) || timeoutMs <= 0)
       throw new RangeError("Provider startup timeout must be positive");
-    this.#deadlineAt = Date.now() + timeoutMs;
+    this.#deadlineAt = performance.now() + timeoutMs;
     this.#externalSignal = signal;
     this.#onExternalAbort = () => {
       if (this.#controller.signal.aborted) return;
-      if (Date.now() >= this.#deadlineAt) {
+      if (performance.now() >= this.#deadlineAt) {
         this.#interruption = "timeout";
         this.#abort(
           new DOMException("Provider startup deadline elapsed", "TimeoutError"),
@@ -79,13 +79,13 @@ export class ProviderStartupDeadline {
   get interruption(): "cancelled" | "timeout" | undefined {
     return (
       this.#interruption ??
-      (Date.now() >= this.#deadlineAt ? "timeout" : undefined)
+      (performance.now() >= this.#deadlineAt ? "timeout" : undefined)
     );
   }
 
   /** Milliseconds still available to the next startup phase. */
   remainingMs(): number {
-    return Math.max(0, this.#deadlineAt - Date.now());
+    return Math.max(0, Math.ceil(this.#deadlineAt - performance.now()));
   }
 
   /** Wait for at most one polling interval under the shared deadline signal. */
