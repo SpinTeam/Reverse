@@ -196,7 +196,7 @@ itWithCaptureCapability(
         result.value.frames.map(({ at_ms }) => at_ms),
         "capture-relative frame times stay ordered and nonnegative",
       ).toEqual(
-        [...result.value.frames.map(({ at_ms }) => at_ms)].sort(
+        result.value.frames.map(({ at_ms }) => at_ms).sort(
           (left, right) => left - right,
         ),
       );
