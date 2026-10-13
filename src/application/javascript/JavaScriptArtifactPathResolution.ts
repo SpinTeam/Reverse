@@ -78,6 +78,8 @@ export interface ResolveArtifactPathInput {
   readonly htmlBaseHref?: string | null;
   /** Import/require semantics; runtime resource paths omit this provenance. */
   readonly moduleKind?: JavaScriptModuleResolutionMode;
+  /** Electron runtime paths identify the exact filename supplied by the caller. */
+  readonly runtimeEntrypoint?: boolean;
 }
 
 /** Preserve an explicitly retained loader mode on graph relationships. */
@@ -225,6 +227,7 @@ const resolvePath = (input: ResolveArtifactPathInput): CandidateResolution => {
   // Package import keys are literal lookup identities, not artifact paths.
   // The selected target is admitted separately by resolveExportTarget.
   if (
+    !input.runtimeEntrypoint &&
     input.context === "module-specifier" &&
     input.declaredPath.startsWith("#")
   )
@@ -233,6 +236,17 @@ const resolvePath = (input: ResolveArtifactPathInput): CandidateResolution => {
   if (typeof candidate !== "string") return candidate;
   const confined = confineCandidate(candidate);
   if (typeof confined !== "string") return confined;
+  if (input.runtimeEntrypoint)
+    return (
+      resolveFileCandidates(input, [confined]) ?? {
+        resolvedPath: null,
+        status: "not-found",
+        candidatePath: confined,
+        limitations: [
+          `The declared Electron runtime entrypoint ${confined} was not found as an exact file among the selected application files; extension and directory fallback were not attempted.`,
+        ],
+      }
+    );
   if (input.context === "html-reference" || input.context === "url-reference")
     return (
       resolveFileCandidates(input, [confined]) ??

@@ -67,6 +67,11 @@ describe("static Electron application analysis", () => {
     });
   });
 
+  it(
+    "keeps Electron runtime entrypoints on their declared filenames",
+    exactRuntimeEntrypointFixture,
+  );
+
   it("keeps computed identifier member keys unknown", async () => {
     const root = await computedMemberFixtureDirectory();
 
@@ -152,6 +157,117 @@ describe("static Electron application analysis", () => {
     ).toBeUndefined();
   });
 });
+
+const exactRuntimeEntrypointFixture = async (): Promise<void> => {
+  const root = await createTestTempDirectory("rea-electron-exact-entrypoints-");
+  await Promise.all([
+    writeFile(
+      join(root, "main.cjs"),
+      String.raw`
+const { BrowserWindow, utilityProcess } = require("electron");
+const path = require("node:path");
+new BrowserWindow({ webPreferences: { preload: "./entry" } });
+new BrowserWindow({ webPreferences: { preload: path.join(__dirname, "preload") } });
+new BrowserWindow({ webPreferences: { preload: "./explicit-preload.js" } });
+utilityProcess.fork("./worker");
+utilityProcess.fork("./service.js");
+`,
+    ),
+    writeFile(join(root, "entry.html"), "<title>sibling</title>"),
+    writeFile(join(root, "preload.html"), "<title>sibling</title>"),
+    writeFile(join(root, "worker.html"), "<title>sibling</title>"),
+    writeFile(join(root, "explicit-preload.js"), "module.exports = {};"),
+    writeFile(join(root, "service.js"), "module.exports = {};")
+  ]);
+
+  const result = await reconstructJavaScriptArtifact({ input_path: root });
+  const graph = parseJavaScriptApplicationGraph(result.graph);
+  const roles = graph.nodes.filter(({ kind }) => kind === "electron-preload");
+  const roleByDeclaration = new Map(
+    roles.map((role) => [
+      role.observations[0]?.properties.declared_path,
+      role,
+    ]),
+  );
+
+  expect(result.electron_summary.resolved_utility_entrypoints).toBe(1);
+  for (const [declaredPath, candidatePath] of [
+    ["./entry", "entry"],
+    ["preload", "preload"],
+  ]) {
+    const role = roleByDeclaration.get(declaredPath);
+    expect(role?.observations[0]?.properties).toMatchObject({
+      declared_path: declaredPath,
+      resolved_path: null,
+      resolution_status: "not-found",
+      candidate_path: candidatePath,
+      limitations: [
+        expect.stringContaining(
+          "extension and directory fallback were not attempted",
+        ),
+      ],
+    });
+    expect(
+      graph.edges.some(
+        (edge) =>
+          edge.source_node_id === role?.node_id && edge.relation === "maps_to",
+      ),
+    ).toBe(false);
+  }
+  expect(
+    roleByDeclaration.get("./explicit-preload.js")?.observations[0]?.properties,
+  ).toMatchObject({
+    resolved_path: "explicit-preload.js",
+    resolution_status: "resolved",
+  });
+
+  const utilityLaunches = graph.edges.filter(
+    (edge) =>
+      edge.evidence.extractor.operation === "map-utility-process-launch",
+  );
+  const unresolvedWorker = utilityLaunches.find(
+    (edge) => edge.properties.declared_path === "./worker",
+  );
+  expect(unresolvedWorker?.evidence).toMatchObject({
+    authority: "static-relationship-inference",
+    state: "inferred",
+    limitations: expect.arrayContaining([
+      "Static syntax does not prove that this relationship executes at runtime.",
+    ]),
+  });
+  expect(utilityLaunches).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        properties: expect.objectContaining({
+          declared_path: "./worker",
+          resolved_path: null,
+          resolution_status: "not-found",
+          candidate_path: "worker",
+          limitations: [
+            expect.stringContaining(
+              "extension and directory fallback were not attempted",
+            ),
+          ],
+        }),
+      }),
+      expect.objectContaining({
+        properties: expect.objectContaining({
+          declared_path: "./service.js",
+          resolved_path: "service.js",
+          resolution_status: "resolved",
+        }),
+      }),
+    ]),
+  );
+  expect(
+    graph.edges.some(
+      (edge) =>
+        edge.evidence.extractor.operation ===
+          "resolve-utility-process-entrypoint" &&
+        edge.properties.resolved_path === "worker.html",
+    ),
+  ).toBe(false);
+};
 
 type Reconstruction = Awaited<ReturnType<typeof reconstructJavaScriptArtifact>>;
 type ApplicationGraph = ReturnType<typeof parseJavaScriptApplicationGraph>;
