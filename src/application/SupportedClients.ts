@@ -157,8 +157,16 @@ const qwenCodeDirectory = ({ home, env }: ClientPathContext): string => {
 const grokDirectory = ({ home, env }: ClientPathContext): string =>
   env.GROK_HOME || join(home, ".grok");
 
-const dshHomeDirectory = ({ home, env }: ClientPathContext): string =>
-  env.DSH_HOME ?? join(home, ".dsh");
+/**
+ * DeepSeek Harness's released `homePatchPath` resolver treats an empty or
+ * whitespace-only `DSH_HOME` as unset. Match the released resolver so an empty
+ * override never leaks through `join(... 'cordis.patch.yml')` as a
+ * cwd-relative patch. Fixes https://github.com/morluto/rea/issues/2666.
+ */
+const dshHomeDirectory = ({ home, env }: ClientPathContext): string => {
+  const override = env.DSH_HOME?.trim();
+  return override && override.length > 0 ? override : join(home, ".dsh");
+};
 
 const dshPatchDirectory = (context: ClientPathContext): string =>
   join(dshHomeDirectory(context), "cordis.patch.yml");
@@ -431,7 +439,7 @@ export const SUPPORTED_CLIENT_DEFINITIONS = [
     configPath: ({ home, platform, env }: ClientPathContext) =>
       join(devinDirectory({ home, platform, env }), "mcp_config.json"),
     markerPath: devinDirectory,
-    format: "json",
+    format: "devin",
   },
   {
     name: "opencode",
