@@ -601,6 +601,10 @@ records independent symbol/directory/SHA oracles; it never executes the target.
 Linux also builds stripped, ordinary-native and small malformed/ambiguous/layout
 negative inputs. The optional Windows fixture workflow builds a PE on a Windows
 runner; analyzing that PE on Linux does not verify a Windows Ghidra host.
+On a local Windows host, the .NET 8 ILCompiler finds the linker only through
+Visual Studio 2019 or 2022 (`vswhere -version [16,18)`). With only Visual
+Studio Build Tools 2026 installed, run its `vcvars64.bat` and set
+`IlcUseEnvironmentalTools=true` before `build:fixtures:nativeaot`.
 
 Build the clean pinned upstream adapter with `build:ghidra:nativeaot`, then set
 `REA_GHIDRA_NATIVEAOT_JAR`. Run `verify:ghidra:nativeaot -- symbols`, `-- stripped`,
