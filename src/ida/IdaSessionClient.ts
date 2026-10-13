@@ -293,8 +293,28 @@ export class IdaSessionClient implements AnalysisClient {
         selectorOrigin: options?.selectorOrigin,
         x86Only: isX86OnlyTarget(this.target),
         callGraphAvailable: this.#callGraphAdvertised,
+        documentIdentity: this.#documentIdentity(),
       },
     );
+  }
+
+  /**
+   * Stable identity of the single document this session is bound to. Attached
+   * sessions own no database id, so the observed input path from metadata is
+   * the only stable identity; headless sessions use the private workspace copy.
+   */
+  #documentIdentity(): string | undefined {
+    if (this.config.mode === "attached") {
+      const metadata = this.#metadata;
+      const path =
+        metadata !== null &&
+        typeof metadata === "object" &&
+        !Array.isArray(metadata)
+          ? metadata.path
+          : undefined;
+      return typeof path === "string" && path.length > 0 ? path : undefined;
+    }
+    return this.#workspace?.inputPath;
   }
 
   #health(metadata: JsonValue) {

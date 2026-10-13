@@ -356,15 +356,17 @@ export const enhancedOutputSchemas: Readonly<Record<string, z.ZodObject>> = {
   binary_overview: evidenceResultOf(
     z.object({
       document: z.string(),
-      segments: z.array(
-        z.object({
-          name: z.string(),
-          start: z.string(),
-          end: z.string(),
-          length: z.number().min(0),
-        }),
-      ),
-      segment_count: z.number().int().min(0),
+      segments: z
+        .array(
+          z.object({
+            name: z.string(),
+            start: z.string(),
+            end: z.string(),
+            length: z.number().min(0),
+          }),
+        )
+        .optional(),
+      segment_count: z.number().int().min(0).optional(),
       procedure_count: z.number().int().min(0),
       string_count: z.number().int().min(0),
       image_base: z.string().min(1).optional(),

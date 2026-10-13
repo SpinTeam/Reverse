@@ -12,6 +12,7 @@ export const IDA_PROVIDER_IDENTITY = Object.freeze({
 
 /** Read-only analyst outcomes supported by the upstream compatibility profiles. */
 export const IDA_OPERATIONS = Object.freeze([
+  "list_documents",
   "list_procedures",
   "search_procedures",
   "list_strings",

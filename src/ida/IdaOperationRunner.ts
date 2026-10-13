@@ -97,6 +97,12 @@ export class IdaOperationRunner {
       readonly x86Only?: boolean;
       /** False when the upstream server does not advertise `callgraph`. */
       readonly callGraphAvailable?: boolean;
+      /**
+       * Stable identity of the single document this runner is bound to: the
+       * attached input path, or the headless workspace input path. Reported by
+       * list_documents the same way Ghidra reports its one imported Program.
+       */
+      readonly documentIdentity?: string | undefined;
     } = {},
   ) {}
 
@@ -111,6 +117,11 @@ export class IdaOperationRunner {
     this.raw.push({ tool, arguments: scoped, result });
     if (this.options.signal?.aborted) throw new AnalysisCancelledError(tool);
     return result;
+  }
+
+  /** The single document identity this session is bound to. */
+  documentIdentity(): string | undefined {
+    return this.options.documentIdentity;
   }
 
   async functions(): Promise<IdaFunction[]> {
@@ -540,6 +551,17 @@ export class IdaOperationRunner {
       const inspectedAddress = idaAddressSchema.parse(parameters.address);
       this.locations.push({ kind: "address", address: inspectedAddress });
       return (await this.xrefs(inspectedAddress)).map(({ address }) => address);
+    }
+    if (operation === "list_documents") {
+      // An IDA session binds exactly one target: the attached input or the
+      // headless database opened through idb_open. Report that identity the
+      // same way Ghidra reports its single imported Program.
+      const identity = this.documentIdentity();
+      if (identity === undefined || identity.length === 0)
+        throw new AnalysisProtocolError(
+          "IDA session has no bound document identity.",
+        );
+      return [identity];
     }
     const fn = await this.resolve(
       z.string().min(1).parse(parameters.procedure),
