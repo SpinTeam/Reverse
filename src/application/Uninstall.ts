@@ -28,10 +28,16 @@ import { resolveClientConfigTransactionPath } from "./ClientConfigPath.js";
 import { readRegularFileText } from "./RegularFileRead.js";
 import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import {
+  appDataRedirection,
   manualRegistrationRemediation,
+  registrationWriteBlocker,
   supportedClients,
   type SetupClient,
 } from "./SupportedClients.js";
+import {
+  redirectedWriteBlocker,
+  type MsixPackageView,
+} from "./MsixPackageStorage.js";
 export { isUninstallFailure } from "./UninstallFailure.js";
 
 interface ManagedPathStats {
@@ -205,23 +211,35 @@ export const systemUninstallHost = (
     selectedHome ?? homeDirectoryFromEnvironment(environment, platform);
   const resources = new ArtifactResourceScope();
   const fileSystem = selectedFileSystem ?? systemFileSystem(resources);
+  // Set with the client list: the package view that redirects this
+  // process's AppData writes, if any.
+  let redirection: MsixPackageView | undefined;
   return {
-    clients: () =>
-      Promise.resolve(
-        supportedClients(home, platform, environment).flatMap((client) =>
-          client.configPaths === undefined
-            ? [client]
-            : client.configPaths.map((configPath) => ({
-                ...client,
-                configPath,
-              })),
+    clients: () => {
+      const clients = supportedClients(home, platform, environment);
+      redirection = appDataRedirection(clients);
+      return Promise.resolve(
+        clients.flatMap((client) =>
+          uninstallConfigPaths(client).map((configPath) => ({
+            ...client,
+            configPath,
+          })),
         ),
-      ),
+      );
+    },
     inspectClient: async (client) => {
       const read = await readClientConfiguration(client, fileSystem);
-      return read.kind === "item" && read.item.status === "failed"
-        ? read.item
-        : undefined;
+      if (read.kind === "item")
+        return read.item.status === "failed" ? read.item : undefined;
+      if (!registrationPresent(read.parsed)) return undefined;
+      // A removal the running package would revert, or redirect into its
+      // private storage, would leave the registration in place.
+      const blocker =
+        registrationWriteBlocker(client, "uninstall") ??
+        redirectedWriteBlocker(redirection, [client.configPath], "uninstall");
+      return blocker === undefined
+        ? undefined
+        : item(client.name, "failed", blocker);
     },
     removeClient: (client) => removeClient(client, fileSystem),
     removeSkill: () =>
@@ -236,6 +254,36 @@ export const systemUninstallHost = (
       }
     },
   };
+};
+
+/**
+ * Every user file that can hold REA's registration for one client. An MSIX
+ * package can read either its private copy or the AppData file, and earlier
+ * setups wrote the AppData file, so both lose REA's entry.
+ */
+const uninstallConfigPaths = (client: SetupClient): readonly string[] => [
+  ...new Set([
+    ...(client.configPaths ?? [client.configPath]),
+    ...(client.msixPackage === undefined
+      ? []
+      : [
+          client.msixPackage.privateConfigPath,
+          client.msixPackage.appDataConfigPath,
+        ]),
+  ]),
+];
+
+/** Whether removal would change this configuration. */
+const registrationPresent = (parsed: ClientConfigurationDocument): boolean => {
+  const name = PRODUCT_IDENTITY.mcpServerKey;
+  return (
+    Object.hasOwn(parsed.servers, name) ||
+    // Beside a native OpenCode V2 table, OpenCode also loads a V1 `mcp.rea`.
+    legacyClientServerPath(parsed, name) !== undefined ||
+    // Harness ownership is the stable entry id. A stale or malformed launcher
+    // still belongs to that id, and so does a direct patch that projects no row.
+    (parsed.dialect === "dsh" && dshDocument(parsed.document).carriesEntry)
+  );
 };
 
 type ClientConfigurationRead =
@@ -308,11 +356,8 @@ const removeClient = async (
   if (read.kind === "item") return read.item;
   const { transactionPath, original, parsed } = read;
   const name = PRODUCT_IDENTITY.mcpServerKey;
-  // Beside a native OpenCode V2 table, OpenCode also loads a V1 `mcp.rea`.
   const legacyPath = legacyClientServerPath(parsed, name);
   const hasNative = Object.hasOwn(parsed.servers, name);
-  // Harness ownership is the stable entry id. A stale or malformed launcher
-  // still belongs to that id, and so does a direct patch that projects no row.
   const carriesDshEntry =
     parsed.dialect === "dsh" && dshDocument(parsed.document).carriesEntry;
   if (
@@ -324,7 +369,7 @@ const removeClient = async (
       "retained",
       "A Cordis expression may produce registration rows, so the patch was retained without changes.",
     );
-  if (!hasNative && legacyPath === undefined && !carriesDshEntry)
+  if (!registrationPresent(parsed))
     return item(client.name, "skipped", "REA registration is absent.");
   const removeNative =
     carriesDshEntry ||
