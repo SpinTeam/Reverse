@@ -28,6 +28,8 @@ type ConcreteMatchBasis = Exclude<MatchBasis, "none">;
 
 interface Keyed<Item> {
   readonly item: Item;
+  /** Declared type and name; an unresolved type is null, the name remains. */
+  readonly identity: string;
   readonly exactKey: string | null;
   readonly signatureKey: string | null;
   readonly structuralKey: string | null;
@@ -48,6 +50,7 @@ interface Ambiguous<Item> {
 
 const keyMethod = (item: Method): Keyed<Method> => ({
   item,
+  identity: identityOf(item),
   exactKey:
     item.body.status === "present" && item.body.normalized_il_sha256 !== null
       ? sha256([
@@ -96,6 +99,7 @@ const keyMethod = (item: Method): Keyed<Method> => ({
 
 const keyField = (item: Field): Keyed<Field> => ({
   item,
+  identity: identityOf(item),
   exactKey:
     item.signature.parse_status === "decoded"
       ? sha256(["field-exact", item.signature.raw_sha256])
@@ -123,15 +127,31 @@ const matchMethods = (
   matchByKeys({
     left,
     right,
-    exactBasis: "exact-il-signature",
-    fallbackBases: [
+    rounds: [
+      {
+        basis: "exact-il-signature",
+        key: declaredAs(({ exactKey }) => exactKey),
+      },
       {
         basis: "exact-signature",
         key: ({ signatureKey }) => signatureKey,
       },
       {
         basis: "structural-method-shape",
+        // An unresolved owner has no declared shape match to prove.
+        key: declaredAs((keyed) =>
+          keyed.item.declaring_type === null ? null : keyed.structuralKey,
+        ),
+      },
+      {
+        basis: "exact-il-signature",
+        key: ({ exactKey }) => exactKey,
+        remap: true,
+      },
+      {
+        basis: "structural-method-shape",
         key: ({ structuralKey }) => structuralKey,
+        remap: true,
       },
     ],
   });
@@ -143,11 +163,19 @@ const matchFields = (
   matchByKeys({
     left,
     right,
-    exactBasis: "field-signature",
-    fallbackBases: [
+    rounds: [
+      {
+        basis: "field-signature",
+        key: declaredAs(({ exactKey }) => exactKey),
+      },
       {
         basis: "exact-signature",
         key: ({ signatureKey }) => signatureKey,
+      },
+      {
+        basis: "field-signature",
+        key: ({ exactKey }) => exactKey,
+        remap: true,
       },
     ],
   });
@@ -155,21 +183,44 @@ const matchFields = (
 export type ManagedMethodMatches = ReturnType<typeof matchMethods>;
 export type ManagedFieldMatches = ReturnType<typeof matchFields>;
 
+interface MatchRound<Item> {
+  readonly basis: ConcreteMatchBasis;
+  readonly key: (item: Keyed<Item>) => string | null;
+  /**
+   * The key omits the declared type and name, so a pair joins different
+   * declared identities; same-identity pairs were taken by earlier rounds.
+   * A member whose own identity is still unpaired on the other side does not
+   * take part, and a group with a member of an unresolved type stays ambiguous.
+   */
+  readonly remap?: true;
+}
+
 interface MatchByKeysInput<Item> {
   readonly left: readonly Keyed<Item>[];
   readonly right: readonly Keyed<Item>[];
-  readonly exactBasis: ConcreteMatchBasis;
-  readonly fallbackBases: readonly {
-    readonly basis: ConcreteMatchBasis;
-    readonly key: (item: Keyed<Item>) => string | null;
-  }[];
+  readonly rounds: readonly MatchRound<Item>[];
 }
 
-const matchByKeys = <Item>({
+export const identityOf = ({
+  declaring_type,
+  name,
+}: {
+  readonly declaring_type: string | null;
+  readonly name: string;
+}): string => sha256([declaring_type, name]);
+
+/** Narrow a key to members of one declared type and name. */
+const declaredAs =
+  <Item>(key: (item: Keyed<Item>) => string | null) =>
+  (item: Keyed<Item>): string | null => {
+    const value = key(item);
+    return value === null ? null : sha256([item.identity, value]);
+  };
+
+const matchByKeys = <Item extends Declared>({
   left,
   right,
-  exactBasis,
-  fallbackBases,
+  rounds,
 }: MatchByKeysInput<Item>): {
   readonly pairs: readonly MatchedPair<Item>[];
   readonly ambiguous: readonly Ambiguous<Item>[];
@@ -178,33 +229,44 @@ const matchByKeys = <Item>({
 } => {
   const usedLeft = new Set<Keyed<Item>>();
   const usedRight = new Set<Keyed<Item>>();
+  const pairedLeft = new Set<Keyed<Item>>();
+  const pairedRight = new Set<Keyed<Item>>();
   const pairs: MatchedPair<Item>[] = [];
   const ambiguous: Ambiguous<Item>[] = [];
-  const rounds: readonly {
-    readonly basis: ConcreteMatchBasis;
-    readonly key: (item: Keyed<Item>) => string | null;
-  }[] = [
-    { basis: exactBasis, key: ({ exactKey }) => exactKey },
-    ...fallbackBases,
-  ];
+  const declarable = ownerlessDeclarable(left, right);
   for (const round of rounds) {
+    const openLeft = left.filter((item) => !usedLeft.has(item));
+    const openRight = right.filter((item) => !usedRight.has(item));
     const leftGroups = groupBy(
-      left.filter((item) => !usedLeft.has(item)),
+      round.remap === true
+        ? remappable(openLeft, unpairedOf(right, pairedRight))
+        : openLeft.filter(declarable),
       round.key,
     );
     const rightGroups = groupBy(
-      right.filter((item) => !usedRight.has(item)),
+      round.remap === true
+        ? remappable(openRight, unpairedOf(left, pairedLeft))
+        : openRight.filter(declarable),
       round.key,
     );
     for (const [key, leftItems] of leftGroups) {
       const rightItems = rightGroups.get(key);
       if (rightItems === undefined) continue;
-      if (leftItems.length === 1 && rightItems.length === 1) {
+      // An unresolved owner may be either member's own counterpart, so a
+      // remap group it joins stays ambiguous.
+      const refused =
+        round.remap === true &&
+        [...leftItems, ...rightItems].some(
+          ({ item }) => item.declaring_type === null,
+        );
+      if (!refused && leftItems.length === 1 && rightItems.length === 1) {
         const [leftItem] = leftItems;
         const [rightItem] = rightItems;
         if (leftItem === undefined || rightItem === undefined) continue;
         usedLeft.add(leftItem);
         usedRight.add(rightItem);
+        pairedLeft.add(leftItem);
+        pairedRight.add(rightItem);
         pairs.push({
           left: leftItem,
           right: rightItem,
@@ -233,6 +295,93 @@ const matchByKeys = <Item>({
     leftOnly: left.filter((item) => !usedLeft.has(item)),
     rightOnly: right.filter((item) => !usedRight.has(item)),
   };
+};
+
+interface Declared {
+  readonly declaring_type: string | null;
+}
+
+const unpairedOf = <Item>(
+  items: readonly Keyed<Item>[],
+  paired: ReadonlySet<Keyed<Item>>,
+): Keyed<Item>[] => items.filter((item) => !paired.has(item));
+
+/**
+ * Exact CIL/signature keys an unresolved owner competes for: a key held by an
+ * ownerless member on either side that another member on the same side also
+ * holds. Such an ownerless member's owner may be that other member, so the
+ * whole key group belongs to the remap rounds, which keep it ambiguous, rather
+ * than a declared round that would pair the resolved members and leave the
+ * ownerless one over. A lone ownerless member still pairs by declared identity.
+ */
+const ownerlessContested = <Item extends Declared>(
+  sides: readonly (readonly Keyed<Item>[])[],
+): ReadonlySet<string> => {
+  const contested = new Set<string>();
+  for (const side of sides) {
+    const seen = new Map<string, number>();
+    const ownerless = new Set<string>();
+    for (const { item, exactKey } of side) {
+      if (exactKey === null) continue;
+      seen.set(exactKey, (seen.get(exactKey) ?? 0) + 1);
+      if (item.declaring_type === null) ownerless.add(exactKey);
+    }
+    for (const key of ownerless)
+      if ((seen.get(key) ?? 0) > 1) contested.add(key);
+  }
+  return contested;
+};
+
+/**
+ * Members a remap round may group: an unresolved owner, which keeps its group
+ * ambiguous; a member whose exact key an unresolved owner competes for, so the
+ * group that preserved the base matcher's ambiguity can form; or no member of
+ * the same declared identity left unpaired on the other side, whether
+ * one-sided or in an ambiguous group. The sets are taken before grouping, so
+ * no group order decides a remap.
+ */
+const remappable = <Item extends Declared>(
+  items: readonly Keyed<Item>[],
+  others: readonly Keyed<Item>[],
+): Keyed<Item>[] => {
+  const kept = new Set(others.map(({ identity }) => identity));
+  const contested = ownerlessContested([items, others]);
+  return items.filter(
+    ({ item, identity, exactKey }) =>
+      (exactKey !== null && contested.has(exactKey)) ||
+      item.declaring_type === null ||
+      !kept.has(identity),
+  );
+};
+
+/**
+ * Whether a member may pair in a declared-identity round. A member with an
+ * unresolved owner may, only when no other member on either side shares its
+ * exact CIL/signature key: its owner might be any of them, so a shared key
+ * leaves it to the remap rounds, which keep such a group ambiguous. The
+ * resolved members that share such a key stay out too, so they cannot pair and
+ * consume the candidate the ownerless member might own.
+ */
+const ownerlessDeclarable = <Item extends Declared>(
+  left: readonly Keyed<Item>[],
+  right: readonly Keyed<Item>[],
+): ((member: Keyed<Item>) => boolean) => {
+  const count = (side: readonly Keyed<Item>[]) => {
+    const seen = new Map<string, number>();
+    for (const { exactKey } of side)
+      if (exactKey !== null) seen.set(exactKey, (seen.get(exactKey) ?? 0) + 1);
+    return seen;
+  };
+  const leftSeen = count(left);
+  const rightSeen = count(right);
+  const contested = ownerlessContested([left, right]);
+  return ({ item, exactKey }) =>
+    exactKey !== null && contested.has(exactKey)
+      ? false
+      : item.declaring_type !== null ||
+        exactKey === null ||
+        ((leftSeen.get(exactKey) ?? 0) <= 1 &&
+          (rightSeen.get(exactKey) ?? 0) <= 1);
 };
 
 const groupBy = <Item>(
