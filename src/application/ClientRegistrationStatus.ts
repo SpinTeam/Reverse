@@ -13,6 +13,7 @@ import { resolve } from "node:path";
 
 import { z } from "zod";
 
+import { registrationSchema } from "./ClientRegistrationShape.js";
 import { PRODUCT_IDENTITY } from "../identity.js";
 import { MCP_STARTUP_POLICY } from "../mcpStartupPolicy.js";
 import {
@@ -59,20 +60,6 @@ export type UnhealthyClientRegistrationStatus = Exclude<
   ClientRegistrationStatus,
   { readonly state: "aligned" }
 >;
-
-const registrationSchema = z
-  .object({
-    command: z.string().min(1),
-    args: z.array(z.string()).default([]),
-    startup_timeout_sec: z.number().positive().optional(),
-    type: z.string().optional(),
-    transport: z.string().optional(),
-    serverName: z.string().optional(),
-    tools: z.array(z.string()).optional(),
-    disabled: z.boolean().optional(),
-    enabled: z.boolean().optional(),
-  })
-  .passthrough();
 
 /** Inspect supported client registrations without reading their environment. */
 export const readClientRegistrationStatuses = async (
