@@ -292,15 +292,29 @@ export const runProductionMcpDoctorCli = async (
       exitCode: 1,
     };
   }
+  const started = performance.now();
   const result = await runProductionMcpDoctor({
     command: process.execPath,
     args: [resolve(input.dispatcherPath), "mcp"],
     cwd: input.packageRoot,
     environment: process.env,
   });
+  const exitCode = result.healthy ? 0 : 1;
+  if (!parsed.fullOutput)
+    return {
+      output: `${Formatter.format(result, parsed.format)}\n`,
+      exitCode,
+    };
+  const meta = {
+    command: "mcp doctor",
+    duration: `${Math.round(performance.now() - started)}ms`,
+  };
+  const document = result.healthy
+    ? { ok: true, data: result, meta }
+    : { ok: false, error: result, meta };
   return {
-    output: `${Formatter.format(result, parsed.format)}\n`,
-    exitCode: result.healthy ? 0 : 1,
+    output: `${Formatter.format(document, parsed.format)}\n`,
+    exitCode,
   };
 };
 
@@ -369,7 +383,7 @@ const parseIdentityToolResult = (
  * flag is an output selector declared in `MCP_DOCTOR_OPTIONS`.
  */
 type McpDoctorArguments =
-  | { readonly ok: true; readonly format: OutputFormat }
+  | { readonly ok: true; readonly format: OutputFormat; readonly fullOutput: boolean }
   | { readonly ok: false; readonly help: true }
   | {
       readonly ok: false;
@@ -387,6 +401,7 @@ const parseOutputArguments = (
   // masking the typo with usage.
   if (hasHelpInOptionPosition(arguments_)) return { ok: false, help: true };
   let format: OutputFormat = "toon";
+  let fullOutput = false;
   for (let index = 0; index < arguments_.length; index += 1) {
     const argument = arguments_[index];
     if (argument === "--json") {
@@ -409,7 +424,10 @@ const parseOutputArguments = (
       format = candidate;
       continue;
     }
-    if (argument === "--full-output") continue;
+    if (argument === "--full-output") {
+      fullOutput = true;
+      continue;
+    }
     if (HELP_FLAGS.has(argument ?? "")) return { ok: false, help: true };
     return {
       ok: false,
@@ -418,7 +436,7 @@ const parseOutputArguments = (
       message: `Unknown mcp doctor option: ${argument ?? "missing"}`,
     };
   }
-  return { ok: true, format };
+  return { ok: true, format, fullOutput };
 };
 
 /**
