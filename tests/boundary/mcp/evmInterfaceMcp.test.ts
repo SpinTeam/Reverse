@@ -1,4 +1,5 @@
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
+import { createHash } from "node:crypto";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { expect, it, onTestFinished, vi } from "vitest";
 import { EvmInterfaceService } from "../../../src/application/evm/EvmInterfaceService.js";
@@ -10,6 +11,7 @@ import {
 } from "../../../src/domain/analysisErrorCore.js";
 import { createEvidence, parseEvidence } from "../../../src/domain/evidence.js";
 import { evmInterfaceSummaryViewResultSchema } from "../../../src/domain/analysisView/analysisView.js";
+import { inspectSolidityMetadata } from "../../../src/evm/SolidityMetadata.js";
 import { err, ok } from "../../../src/domain/result.js";
 import { silentLogger } from "../../../src/logger.js";
 import { createServer } from "../../../src/server/createServer.js";
@@ -28,6 +30,17 @@ import {
 
 it("advertises exact valid schemas and records inline EVM interface evidence without a binary target", async () => {
   const value = evmInterfaceFixture();
+  value.bytecode = {
+    ...value.bytecode,
+    hex: "00a1011bffffffffffffffff000b",
+    bytes: 14,
+    sha256: createHash("sha256")
+      .update(Buffer.from("00a1011bffffffffffffffff000b", "hex"))
+      .digest("hex"),
+    metadata: inspectSolidityMetadata(
+      Buffer.from("00a1011bffffffffffffffff000b", "hex"),
+    ),
+  };
   const service = new EvmInterfaceService({
     inspect: () => Promise.resolve(ok(evmInterfaceExecution(value))),
   });
@@ -253,6 +266,9 @@ it("settles the admitted EVM operation after SDK cancellation and accepts a subs
 
 it("returns the exact inferred interface summary while preserving complete defaults and retained source", async () => {
   const value = evmInterfaceFixture();
+  value.bytecode.metadata = inspectSolidityMetadata(
+    Buffer.from(value.bytecode.hex, "hex"),
+  );
   value.functions = [
     {
       selector: "0x11223344",

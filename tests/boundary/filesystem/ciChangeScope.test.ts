@@ -230,6 +230,10 @@ it.each([
     { code: true, runtime: true, evm: true, browser: false, package: false },
   ],
   [
+    "scripts/verify-solidity-metadata.mjs",
+    { code: true, evm: true, browser: false, package: false },
+  ],
+  [
     "src/browser/execution/evaluate.ts",
     {
       code: true,
