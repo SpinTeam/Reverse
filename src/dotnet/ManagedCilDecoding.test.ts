@@ -67,6 +67,25 @@ const managedBodyWithRegion = ({
     .methods[0]?.body;
 };
 
+const fatBody = (il: Buffer) => {
+  const header = Buffer.alloc(12);
+  header.writeUInt16LE(0x3013, 0);
+  header.writeUInt16LE(8, 2);
+  header.writeUInt32LE(il.length, 4);
+  const bytes = buildManagedPeFixture({
+    ilBody: Buffer.concat([header, il]),
+  });
+  return inspectManagedMembersBytes(bytes, managedPeFixtureTarget(bytes))
+    .methods[0]?.body;
+};
+
+/** Body bytes supplied verbatim; a tiny header is read from the first byte. */
+const tinyBody = (ilBody: Buffer) => {
+  const bytes = buildManagedPeFixture({ ilBody });
+  return inspectManagedMembersBytes(bytes, managedPeFixtureTarget(bytes))
+    .methods[0]?.body;
+};
+
 describe("managed CIL decoding", () => {
   it("reads fat method header size from the full flags-and-size word", () => {
     const il = Buffer.from([
@@ -217,6 +236,99 @@ describe("managed CIL decoding", () => {
       local_var_sig_token: "0x11000001",
       il_sha256: tiny.methods[0]?.body.il_sha256,
       normalized_il_sha256: tiny.methods[0]?.body.normalized_il_sha256,
+    });
+  });
+});
+
+describe("managed operand extent diagnostics", () => {
+  it("names the truncated instruction instead of the Buffer read failure", () => {
+    // A tiny header of 0x06 declares a single IL byte, so ldc.i4 has no
+    // operand room and its 4-byte read would leave the method body.
+    expect(tinyBody(Buffer.from([0x06, 0x20]))).toMatchObject({
+      status: "malformed",
+      header_format: "tiny",
+      il_size: 1,
+      decoded_instruction_count: 0,
+      normalized_il_sha256: null,
+      issue: "Instruction ldc.i4 at IL offset 0 leaves method body",
+    });
+  });
+
+  it.each([
+    ["short variable", Buffer.from([0x0e]), "ldarg.s"],
+    ["wide variable", Buffer.from([0xfe, 0x09]), "ldarg"],
+    ["int32 constant", Buffer.from([0x20]), "ldc.i4"],
+    ["int64 constant", Buffer.from([0x21]), "ldc.i8"],
+    ["float32 constant", Buffer.from([0x22]), "ldc.r4"],
+    ["float64 constant", Buffer.from([0x23]), "ldc.r8"],
+    ["short branch", Buffer.from([0x2b]), "br.s"],
+    ["long branch", Buffer.from([0x38]), "br"],
+    ["prefixed short constant", Buffer.from([0xfe, 0x12]), "unaligned."],
+    ["string token", Buffer.from([0x72]), "ldstr"],
+    ["type token", Buffer.from([0x71]), "ldobj"],
+    ["field token", Buffer.from([0x7b]), "ldfld"],
+    ["method token", Buffer.from([0x28]), "call"],
+  ] as const)(
+    "reports a truncated %s operand at its own instruction",
+    (_label, il, name) => {
+      expect(fatBody(il)).toMatchObject({
+        status: "malformed",
+        decoded_instruction_count: 0,
+        normalized_il_sha256: null,
+        issue: `Instruction ${name} at IL offset 0 leaves method body`,
+      });
+    },
+  );
+
+  it("reports a switch whose target table is missing", () => {
+    expect(
+      fatBody(Buffer.from([0x00, 0x45, 0x02, 0x00, 0x00, 0x00])),
+    ).toMatchObject({
+      status: "malformed",
+      decoded_instruction_count: 1,
+      opcode_counts: { nop: 1 },
+      issue: "Instruction switch at IL offset 1 leaves method body",
+    });
+  });
+
+  it("reports a switch whose target count is itself truncated", () => {
+    expect(fatBody(Buffer.from([0x45, 0x02]))).toMatchObject({
+      status: "malformed",
+      decoded_instruction_count: 0,
+      issue: "Instruction switch at IL offset 0 leaves method body",
+    });
+  });
+
+  it("preserves instructions decoded before a truncated operand", () => {
+    expect(fatBody(Buffer.from([0x00, 0x20]))).toMatchObject({
+      status: "malformed",
+      il_size: 2,
+      decoded_instruction_count: 1,
+      opcode_counts: { nop: 1 },
+      issue: "Instruction ldc.i4 at IL offset 1 leaves method body",
+    });
+  });
+
+  it("keeps a complete operand-bearing body decodable", () => {
+    expect(
+      fatBody(Buffer.from([0x00, 0x20, 0x01, 0x00, 0x00, 0x00, 0x2a])),
+    ).toMatchObject({
+      status: "present",
+      decoded_instruction_count: 3,
+      opcode_counts: { nop: 1, "ldc.i4": 1, ret: 1 },
+      issue: null,
+    });
+  });
+
+  it("still decodes a switch whose targets fit", () => {
+    const il = Buffer.from([
+      0x00, 0x45, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x2a,
+    ]);
+    expect(fatBody(il)).toMatchObject({
+      status: "present",
+      il_size: il.length,
+      opcode_counts: { nop: 1, switch: 1, ret: 1 },
+      issue: null,
     });
   });
 });
