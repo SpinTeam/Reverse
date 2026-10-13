@@ -266,6 +266,13 @@ const finalizeHierarchyCoverage = (
     ...result,
     documents: result.documents.map((document) => ({
       ...document,
+      // The dictionary parser only sees connectors that were projected, so the
+      // omission recorded where an ownerless connector was dropped has to be
+      // added here for this producer to report the same document count as the
+      // keyed-archive producer for the same recognized connector.
+      connection_count:
+        document.connection_count +
+        (unresolvedConnections.get(document.relative_path) ?? 0),
       hierarchy_complete:
         document.hierarchy_complete &&
         !incompleteHierarchies.has(document.relative_path),
@@ -295,7 +302,10 @@ const finalizeHierarchyCoverage = (
             ? {
                 ...facet,
                 status: "partial" as const,
-                reason: "connection_unresolved",
+                // A connection dropped by the limit is recoverable by raising
+                // it, so that cause keeps the reason the graph already named.
+                // Only a facet with no other cause reports the omission.
+                reason: facet.reason ?? "connection_unresolved",
                 omitted: facet.omitted + omittedConnection,
               }
             : facet;
