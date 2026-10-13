@@ -156,7 +156,7 @@ npx rea-agents@latest setup
 
 <a id="choosing-a-deep-analysis-provider"></a>
 
-تختلف صيغ ملفات الشيفرة الأصلية والأنظمة المضيفة المدعومة باختلاف الموفّر. راجع [إعداد Hopper وGhidra](docs/installation.md#hopper)، و[دليل IDA](docs/ida-provider.md)، و[دعم Ghidra التجريبي على Windows](docs/windows-ghidra-p0.md). يدعم Ghidra أيضًا [تحليل DOS ذي 16 بت](docs/ghidra-dos.md). لاختيار الموفّر، راجع [دليل CLI](docs/cli.md#choose-a-provider). تحقّق من [توفر الميزات في الإصدارات](docs/installation.md#released-package-and-main) للميزات المضافة بعد أحدث إصدار على npm.
+تختلف صيغ ملفات الشيفرة الأصلية والأنظمة المضيفة المدعومة باختلاف الموفّر. راجع [إعداد Hopper وGhidra](docs/installation.md#hopper)، و[دليل IDA](docs/ida-provider.md), [دليل angr](docs/angr-provider.md)، و[دعم Ghidra التجريبي على Windows](docs/windows-ghidra-p0.md). يدعم Ghidra أيضًا [تحليل DOS ذي 16 بت](docs/ghidra-dos.md). لاختيار الموفّر، راجع [دليل CLI](docs/cli.md#choose-a-provider). تحقّق من [توفر الميزات في الإصدارات](docs/installation.md#released-package-and-main) للميزات المضافة بعد أحدث إصدار على npm.
 
 ## دراسات الحالة
 

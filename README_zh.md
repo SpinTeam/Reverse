@@ -156,7 +156,7 @@ REA 需要 Node.js 22.x（>=22.19）、24.x（>=24.11）或 26+，以及 npm。�
 
 <a id="choosing-a-deep-analysis-provider"></a>
 
-不同提供方支持的原生格式和主机系统有所不同。请参阅 [Hopper 与 Ghidra 设置](docs/installation.md#hopper)、[IDA 指南](docs/ida-provider.md)和[实验性 Windows Ghidra 支持](docs/windows-ghidra-p0.md)。Ghidra 也支持 [16 位 DOS 分析](docs/ghidra-dos.md)。提供方选择见 [CLI 指南](docs/cli.md#choose-a-provider)。对于最新 npm 版本发布后新增的功能，请查看[发布可用性](docs/installation.md#released-package-and-main)。
+不同提供方支持的原生格式和主机系统有所不同。请参阅 [Hopper 与 Ghidra 设置](docs/installation.md#hopper)、[IDA 指南](docs/ida-provider.md)、[angr 指南](docs/angr-provider.md)和[实验性 Windows Ghidra 支持](docs/windows-ghidra-p0.md)。Ghidra 也支持 [16 位 DOS 分析](docs/ghidra-dos.md)。提供方选择见 [CLI 指南](docs/cli.md#choose-a-provider)。对于最新 npm 版本发布后新增的功能，请查看[发布可用性](docs/installation.md#released-package-and-main)。
 
 ## 案例
 

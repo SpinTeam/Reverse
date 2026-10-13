@@ -156,7 +156,7 @@ Statische JavaScript- und .NET-Untersuchungen lesen die bereitgestellten Dateien
 
 <a id="choosing-a-deep-analysis-provider"></a>
 
-Native Formate und unterstützte Hostsysteme unterscheiden sich je nach Provider. Siehe [Hopper- und Ghidra-Einrichtung](docs/installation.md#hopper), den [IDA-Leitfaden](docs/ida-provider.md) und die [experimentelle Ghidra-Unterstützung unter Windows](docs/windows-ghidra-p0.md). Ghidra unterstützt auch [16-Bit-DOS-Analyse](docs/ghidra-dos.md). Die Provider-Auswahl beschreibt der [CLI-Leitfaden](docs/cli.md#choose-a-provider). Prüfe die [Verfügbarkeit in Releases](docs/installation.md#released-package-and-main) für Funktionen, die seit der neuesten npm-Version hinzugekommen sind.
+Native Formate und unterstützte Hostsysteme unterscheiden sich je nach Provider. Siehe [Hopper- und Ghidra-Einrichtung](docs/installation.md#hopper), den [IDA-Leitfaden](docs/ida-provider.md), [angr-Leitfaden](docs/angr-provider.md) und die [experimentelle Ghidra-Unterstützung unter Windows](docs/windows-ghidra-p0.md). Ghidra unterstützt auch [16-Bit-DOS-Analyse](docs/ghidra-dos.md). Die Provider-Auswahl beschreibt der [CLI-Leitfaden](docs/cli.md#choose-a-provider). Prüfe die [Verfügbarkeit in Releases](docs/installation.md#released-package-and-main) für Funktionen, die seit der neuesten npm-Version hinzugekommen sind.
 
 ## Fallstudien
 

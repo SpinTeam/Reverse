@@ -156,7 +156,7 @@ Statyczna analiza JavaScript i .NET odczytuje dostarczone pliki bez uruchamiania
 
 <a id="choosing-a-deep-analysis-provider"></a>
 
-Obsługiwane formaty natywne i platformy zależą od dostawcy analizy. Zobacz [konfigurację Hoppera i Ghidry](docs/installation.md#hopper), [przewodnik IDA](docs/ida-provider.md) oraz [eksperymentalną obsługę Ghidry w systemie Windows](docs/windows-ghidra-p0.md). Ghidra obsługuje też [analizę 16-bitowego DOS-a](docs/ghidra-dos.md). Wybór dostawcy opisuje [przewodnik CLI](docs/cli.md#choose-a-provider). Sprawdź [dostępność w wydaniach](docs/installation.md#released-package-and-main) dla funkcji dodanych po najnowszym wydaniu npm.
+Obsługiwane formaty natywne i platformy zależą od dostawcy analizy. Zobacz [konfigurację Hoppera i Ghidry](docs/installation.md#hopper), [przewodnik IDA](docs/ida-provider.md), [przewodnik angr](docs/angr-provider.md) oraz [eksperymentalną obsługę Ghidry w systemie Windows](docs/windows-ghidra-p0.md). Ghidra obsługuje też [analizę 16-bitowego DOS-a](docs/ghidra-dos.md). Wybór dostawcy opisuje [przewodnik CLI](docs/cli.md#choose-a-provider). Sprawdź [dostępność w wydaniach](docs/installation.md#released-package-and-main) dla funkcji dodanych po najnowszym wydaniu npm.
 
 ## Przykłady zastosowań
 

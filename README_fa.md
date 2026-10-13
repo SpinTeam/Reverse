@@ -148,7 +148,7 @@ REA به Node.js 22.x (>=22.19)، 24.x (>=24.11) یا 26+، به‌همراه np
 
 <a id="choosing-a-deep-analysis-provider"></a>
 
-فرمت‌های بومی و پشتیبانی سیستم میزبان بر اساس ارائه‌دهنده متفاوت‌اند. [راه‌اندازی Hopper و Ghidra](docs/installation.md#hopper)، [راهنمای IDA](docs/ida-provider.md) و [پشتیبانی آزمایشی Ghidra در ویندوز](docs/windows-ghidra-p0.md) را ببینید. Ghidra همچنین از [تحلیل DOS شانزده‌بیتی](docs/ghidra-dos.md) پشتیبانی می‌کند. برای انتخاب ارائه‌دهنده، به [راهنمای CLI](docs/cli.md#choose-a-provider) مراجعه کنید. برای قابلیت‌هایی که پس از آخرین انتشار npm اضافه شده‌اند، [وضعیت انتشار](docs/installation.md#released-package-and-main) را بررسی کنید.
+فرمت‌های بومی و پشتیبانی سیستم میزبان بر اساس ارائه‌دهنده متفاوت‌اند. [راه‌اندازی Hopper و Ghidra](docs/installation.md#hopper)، [راهنمای IDA](docs/ida-provider.md), [راهنمای angr](docs/angr-provider.md) و [پشتیبانی آزمایشی Ghidra در ویندوز](docs/windows-ghidra-p0.md) را ببینید. Ghidra همچنین از [تحلیل DOS شانزده‌بیتی](docs/ghidra-dos.md) پشتیبانی می‌کند. برای انتخاب ارائه‌دهنده، به [راهنمای CLI](docs/cli.md#choose-a-provider) مراجعه کنید. برای قابلیت‌هایی که پس از آخرین انتشار npm اضافه شده‌اند، [وضعیت انتشار](docs/installation.md#released-package-and-main) را بررسی کنید.
 
 ## نمونه‌های عملی
 

@@ -163,7 +163,7 @@ Pemeriksaan JavaScript dan .NET statis membaca berkas yang disediakan tanpa menj
 
 <a id="choosing-a-deep-analysis-provider"></a>
 
-Format native dan dukungan sistem host berbeda-beda menurut penyedia. Lihat [penyiapan Hopper dan Ghidra](docs/installation.md#hopper), [panduan IDA](docs/ida-provider.md), dan [dukungan eksperimental Ghidra di Windows](docs/windows-ghidra-p0.md).
+Format native dan dukungan sistem host berbeda-beda menurut penyedia. Lihat [penyiapan Hopper dan Ghidra](docs/installation.md#hopper), [panduan IDA](docs/ida-provider.md), [panduan angr](docs/angr-provider.md), dan [dukungan eksperimental Ghidra di Windows](docs/windows-ghidra-p0.md).
 
 Ghidra juga mendukung [analisis DOS 16-bit](docs/ghidra-dos.md).
 
