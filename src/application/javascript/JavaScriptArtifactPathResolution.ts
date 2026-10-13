@@ -26,6 +26,7 @@ import {
 import { isRelativeJavaScriptModuleSpecifier } from "../../domain/javascript/javascriptModuleSpecifier.js";
 import type { JavaScriptModuleResolutionMode } from "../../domain/javascript/javascriptModuleResolutionMode.js";
 import type { JsonValue } from "../../domain/jsonValue.js";
+import { err, ok, type Result } from "../../domain/result.js";
 
 type ArtifactPathResolutionContext =
   | "package-entrypoint"
@@ -100,11 +101,21 @@ const EXTENSIONS = [
 // A private URL namespace for logical artifact paths, including root packages.
 // Encode inventory segments so filename punctuation remains literal in the base.
 const PACKAGE_ARTIFACT_ROOT_URL = new URL("file:///rea-artifact/");
-const packageMetadataUrl = (path: string): URL =>
-  new URL(
-    path.split("/").map(encodeURIComponent).join("/"),
-    PACKAGE_ARTIFACT_ROOT_URL,
-  );
+const packageMetadataUrl = (path: string): Result<URL, string> => {
+  try {
+    return ok(
+      new URL(
+        path.split("/").map(encodeURIComponent).join("/"),
+        PACKAGE_ARTIFACT_ROOT_URL,
+      ),
+    );
+  } catch (cause: unknown) {
+    if (!(cause instanceof URIError)) throw cause;
+    return err(
+      `Package metadata path ${JSON.stringify(path)} contains an unpaired UTF-16 surrogate and cannot be represented as a URL.`,
+    );
+  }
+};
 
 interface PackageFileTarget {
   readonly value: string;
@@ -556,9 +567,11 @@ const resolvePackageImportAlias = (
   const selected = selectExportTarget(
     lookup.target,
     packageExportConditions(input.moduleKind),
-    packageMetadataUrl(metadata.path),
+    metadata.path,
     "imports",
   );
+  if (selected.kind === "unavailable")
+    return unresolvedCandidate("unavailable", [selected.limitation]);
   if (selected.kind === "invalid" || selected.kind === "invalid-config")
     return unresolvedCandidate("rejected", [
       `Package metadata ${metadata.path}: ${selected.limitation}`,
@@ -632,17 +645,9 @@ const resolvePackageDependency = (
               fileCandidates(directory, input.moduleKind),
             )) ?? resolveDirectory(input, directory, metadata, new Set())
       );
-    // Resolve legacy ESM subpaths as URLs: suffixes identify the loaded module
-    // but do not belong to its filesystem path. Keep the declared specifier on
-    // the relationship; only derive the inventory lookup path here.
-    const fileSubpath =
-      input.moduleKind === "import"
-        ? decodeModuleUrlPath(stripQueryAndFragment(subpath.slice(2)))
-        : subpath.slice(2);
-    if (typeof fileSubpath !== "string") return fileSubpath;
-    const candidate = confineCandidate(`${directory}/${fileSubpath}`);
-    if (input.moduleKind === "import" && typeof candidate === "string")
-      return resolveLegacyEsmSubpath(input, candidate);
+    if (input.moduleKind === "import")
+      return resolveLegacyEsmSubpath(input, directory, subpath);
+    const candidate = confineCandidate(`${directory}/${subpath.slice(2)}`);
     return typeof candidate === "string"
       ? resolveCandidate(input, candidate, new Set())
       : candidate;
@@ -658,8 +663,34 @@ const resolvePackageDependency = (
 /** Legacy ESM package subpaths are exact URLs, never extension or directory lookups. */
 const resolveLegacyEsmSubpath = (
   input: ResolveArtifactPathInput,
-  candidate: string,
+  directory: string,
+  subpath: string,
 ): CandidateResolution => {
+  const declarationRejection = rejectDeclaration(
+    stripQueryAndFragment(htmlUrlText(subpath)),
+  );
+  if (declarationRejection !== null) return declarationRejection;
+  const metadataUrl = packageMetadataUrl(posix.join(directory, "package.json"));
+  if (!metadataUrl.ok)
+    return unresolvedCandidate("unavailable", [metadataUrl.error]);
+  const url = new URL(subpath, metadataUrl.value);
+  if (!url.pathname.startsWith(PACKAGE_ARTIFACT_ROOT_URL.pathname))
+    return unresolvedCandidate("rejected", [
+      "The resolved candidate escapes the canonical artifact root.",
+    ]);
+  const encodedPath = url.pathname.slice(
+    PACKAGE_ARTIFACT_ROOT_URL.pathname.length,
+  );
+  const rejected = rejectDeclaration(encodedPath);
+  if (rejected !== null) return rejected;
+  const decoded = decodeModuleUrlPath(encodedPath);
+  if (typeof decoded !== "string") return decoded;
+  const candidate = confineCandidate(decoded);
+  if (typeof candidate !== "string") return candidate;
+  if (urlPathIsDirectory(url.pathname))
+    return unresolvedCandidate("rejected", [
+      `ESM package subpath ${JSON.stringify(input.declaredPath)} has URL directory form; directory imports are unsupported and no exact-file, package main or index lookup was attempted.`,
+    ]);
   const file = resolveFileCandidates(input, [candidate]);
   if (file !== null) return file;
   const source = input.files.get(input.sourcePath);
@@ -682,6 +713,8 @@ const resolvePackageExports = (
     input.moduleKind,
     packagePath,
   );
+  if (exported.status === "unavailable")
+    return unresolvedCandidate("unavailable", [exported.limitation]);
   if (exported.status === "rejected")
     return unresolvedCandidate("rejected", [
       `Package metadata ${packagePath}: ${exported.limitation}`,
@@ -1093,6 +1126,7 @@ type PackageTargetBlockCause = "null" | "empty-array";
 type PackageExportOutcome =
   | ({ readonly status: "value" } & PackageFileTarget)
   | { readonly status: "rejected"; readonly limitation: string }
+  | { readonly status: "unavailable"; readonly limitation: string }
   | { readonly status: "blocked"; readonly cause: PackageTargetBlockCause }
   | { readonly status: "unmatched"; readonly declared: readonly string[] };
 
@@ -1128,8 +1162,10 @@ const selectPackageExport = (
   const selected = selectExportTarget(
     target,
     packageExportConditions(moduleKind),
-    packageMetadataUrl(packagePath),
+    packagePath,
   );
+  if (selected.kind === "unavailable")
+    return { status: "unavailable", limitation: selected.limitation };
   if (selected.kind === "invalid" || selected.kind === "invalid-config")
     return { status: "rejected", limitation: selected.limitation };
   if (selected.kind === "unmatched")
@@ -1156,6 +1192,7 @@ type ExportTargetOutcome =
   | { readonly kind: "non-relative"; readonly value: string }
   | { readonly kind: "blocked"; readonly cause: PackageTargetBlockCause }
   | { readonly kind: "unmatched"; readonly declared: readonly string[] }
+  | { readonly kind: "unavailable"; readonly limitation: string }
   | { readonly kind: "invalid"; readonly limitation: string }
   | { readonly kind: "invalid-config"; readonly limitation: string };
 
@@ -1187,7 +1224,7 @@ const forbiddenExportSegment = (value: string): string | undefined =>
 
 const selectStringPackageTarget = (
   value: string,
-  packageUrl: URL,
+  packagePath: string,
   mapKind: "exports" | "imports",
 ): ExportTargetOutcome => {
   if (mapKind === "imports") {
@@ -1208,11 +1245,14 @@ const selectStringPackageTarget = (
       `contains forbidden path segment ${JSON.stringify(forbidden)} before URL normalization`,
       mapKind,
     );
+  const packageUrl = packageMetadataUrl(packagePath);
+  if (!packageUrl.ok)
+    return { kind: "unavailable", limitation: packageUrl.error };
   // Node constructs the URL before deciding whether this array entry is an
   // invalid package target. Tabs/newlines and dot segments normalize here;
   // percent decoding and existence checks belong after target selection.
-  const url = new URL(value, packageUrl);
-  if (!url.pathname.startsWith(new URL(".", packageUrl).pathname))
+  const url = new URL(value, packageUrl.value);
+  if (!url.pathname.startsWith(new URL(".", packageUrl.value).pathname))
     return invalidExportTarget(
       value,
       "escapes the package root after URL normalization",
@@ -1228,7 +1268,7 @@ const selectStringPackageTarget = (
 const selectArrayPackageTarget = (
   value: readonly unknown[],
   conditions: ReadonlySet<string>,
-  packageUrl: URL,
+  packagePath: string,
   mapKind: "exports" | "imports",
 ): ExportTargetOutcome => {
   if (value.length === 0) return { kind: "blocked", cause: "empty-array" };
@@ -1237,7 +1277,7 @@ const selectArrayPackageTarget = (
     | undefined;
   const declared = new Set<string>();
   for (const entry of value) {
-    const nested = selectExportTarget(entry, conditions, packageUrl, mapKind);
+    const nested = selectExportTarget(entry, conditions, packagePath, mapKind);
     // Node's array fallback catches invalid targets, not invalid configuration.
     if (nested.kind === "invalid-config") return nested;
     if (nested.kind === "unmatched") {
@@ -1263,14 +1303,14 @@ const selectArrayPackageTarget = (
 const selectExportTarget = (
   value: unknown,
   conditions: ReadonlySet<string>,
-  packageUrl: URL,
+  packagePath: string,
   mapKind: "exports" | "imports" = "exports",
 ): ExportTargetOutcome => {
   if (typeof value === "string")
-    return selectStringPackageTarget(value, packageUrl, mapKind);
+    return selectStringPackageTarget(value, packagePath, mapKind);
   if (value === null) return { kind: "blocked", cause: "null" };
   if (Array.isArray(value))
-    return selectArrayPackageTarget(value, conditions, packageUrl, mapKind);
+    return selectArrayPackageTarget(value, conditions, packagePath, mapKind);
   if (typeof value !== "object")
     return invalidExportTarget(
       value,
@@ -1289,7 +1329,7 @@ const selectExportTarget = (
   for (const [condition, target] of Object.entries(value)) {
     declared.add(condition);
     if (!conditions.has(condition)) continue;
-    const nested = selectExportTarget(target, conditions, packageUrl, mapKind);
+    const nested = selectExportTarget(target, conditions, packagePath, mapKind);
     if (nested.kind !== "unmatched") return nested;
     for (const name of nested.declared) declared.add(name);
   }
