@@ -628,6 +628,38 @@ export class IdaOperationRunner {
       basic_blocks: [],
       native_api: null,
       native_value_flow: null,
+      facet_availability: {
+        pseudocode:
+          pseudocode === null
+            ? { available: false, reason: "IDA did not supply pseudocode." }
+            : { available: true },
+        assembly: { available: true },
+        comments: {
+          available: false,
+          reason: "IDA adapter does not expose typed comments.",
+        },
+        callers:
+          this.protocol === "modern"
+            ? {
+                available: false,
+                reason: "Modern IDA profile does not prove direct callers.",
+              }
+            : { available: true },
+        callees: { available: true },
+        references: {
+          available: false,
+          reason: "IDA adapter does not expose typed reference edges.",
+        },
+        strings_names: {
+          available: false,
+          reason:
+            "IDA adapter does not expose function-referenced strings and names.",
+        },
+        cfg: {
+          available: false,
+          reason: "IDA adapter does not expose basic blocks.",
+        },
+      },
       limitations: [
         ...IDA_LIMITATIONS,
         ...this.limitations,
