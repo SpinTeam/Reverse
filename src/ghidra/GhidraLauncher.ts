@@ -5,7 +5,7 @@ import {
 } from "./GhidraAnalysisSeeds.js";
 import type { GhidraLanguageOverride } from "../config/ghidraLanguageOverride.js";
 import { snapshotEnvironment } from "../process/snapshotEnvironment.js";
-import { mkdir, realpath } from "node:fs/promises";
+import { mkdir, readFile, realpath } from "node:fs/promises";
 import { basename, dirname, join, posix, win32 } from "node:path";
 
 import writeFileAtomic from "write-file-atomic";
@@ -219,7 +219,11 @@ export class GhidraHeadlessLauncher implements GhidraLauncher {
             "Installed Allegrex content changed since profile resolution; reopen the target to resolve a fresh profile.",
           );
       }
-      await createGhidraRuntimeDirectories(paths, platform);
+      await createGhidraRuntimeDirectories(
+        paths,
+        platform,
+        await ghidraConfigReleaseDirectory(this.options.analyzeHeadlessPath),
+      );
       const seedPath =
         this.options.analysisSeeds === undefined
           ? undefined
@@ -721,9 +725,48 @@ const ghidraRuntimePaths = (runtimeRoot: string) => ({
   scriptLogPath: join(runtimeRoot, "script.log"),
 });
 
+const ghidraPropertyValue = (
+  properties: string,
+  key: string,
+): string | undefined =>
+  new RegExp(`^\\s*${key.replaceAll(".", "\\.")}\\s*=\\s*(.+?)\\s*$`, "mu").exec(
+    properties,
+  )?.[1];
+
+/**
+ * Ghidra's launch support resolves its JDK before the headless run and then
+ * persists that choice under `<config>/ghidra/<release directory>`. Inside
+ * REA's Windows private runtime a child JVM cannot create those directories
+ * itself, so startup aborted with "Failed to create directory" and reported
+ * that no supported JDK was found. Create the release directory while this
+ * process still owns the runtime, leaving Ghidra only a file write inside it.
+ */
+const ghidraConfigReleaseDirectory = async (
+  analyzeHeadlessPath: string,
+): Promise<string> => {
+  const installRoot = dirname(dirname(analyzeHeadlessPath));
+  try {
+    const properties = await readFile(
+      join(installRoot, "Ghidra", "application.properties"),
+      "utf8",
+    );
+    const version = ghidraPropertyValue(properties, "application.version");
+    const release = ghidraPropertyValue(properties, "application.release.name");
+    return version === undefined || release === undefined || release.length === 0
+      ? basename(installRoot)
+      : `ghidra_${version}_${release}`;
+  } catch (cause: unknown) {
+    // An unreadable properties file leaves the release coordinate unknown; the
+    // conventional extraction directory carries the same name.
+    void cause;
+    return basename(installRoot);
+  }
+};
+
 const createGhidraRuntimeDirectories = async (
   paths: ReturnType<typeof ghidraRuntimePaths>,
   platform: NodeJS.Platform,
+  configReleaseDirectory: string,
 ): Promise<void> => {
   if (platform === "win32") {
     const runtime = windowsPrivateRuntime(dirname(paths.projectRoot));
@@ -736,6 +779,11 @@ const createGhidraRuntimeDirectories = async (
       paths.dataRoot,
     ])
       runtime.mkdir(basename(path));
+    // Each level needs its parent first: the native owner opens every existing
+    // component and creates only the final one.
+    const configRoot = basename(paths.configRoot);
+    runtime.mkdir(win32.join(configRoot, "ghidra"));
+    runtime.mkdir(win32.join(configRoot, "ghidra", configReleaseDirectory));
     return;
   }
   await Promise.all(
@@ -746,6 +794,7 @@ const createGhidraRuntimeDirectories = async (
       paths.cacheRoot,
       paths.configRoot,
       paths.dataRoot,
+      join(paths.configRoot, "ghidra", configReleaseDirectory),
     ].map((path) => mkdir(path, { recursive: true, mode: 0o700 })),
   );
 };
