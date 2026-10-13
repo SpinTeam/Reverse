@@ -1,7 +1,10 @@
 # Recorded crash evidence
 
 `inspect_recorded_crash` / `rea inspect-recorded-crash` inspect a caller-selected
-Linux ELF64 x86-64 little-endian core independently of an active binary target.
+Linux ELF64 little-endian core independently of an active binary target. Two
+architecture profiles are interpreted, x86-64 and AArch64; each binds registers
+to its own `NT_PRSTATUS` layout, and any other `e_machine` is refused as
+`unsupported_target` before note interpretation.
 
 ```sh
 export REA_PWNTOOLS_PYTHON=/absolute/existing/venv/bin/python
@@ -10,8 +13,8 @@ rea inspect-recorded-crash ./crash.core --json
 
 The selected Python needs unchanged pwntools 4.15.0, pyelftools 0.33 and Unicorn 2.1.2.
 REA does not install these dependencies. ELFFile/its original ELF structures and
-pwntools' original Linux amd64 ctypes provide parsing and ABI layout. The adapter
-adds bounds, representation preservation and lifecycle ownership.
+pwntools' original Linux amd64 and aarch64 ctypes provide parsing and ABI layout.
+The adapter adds bounds, representation preservation and lifecycle ownership.
 The initial Linux note profile accepts System V/unspecified and GNU/Linux OSABI
 with ABI version zero. Other declared ABIs return `unsupported_target` before
 note interpretation; an unspecified OSABI alone does not prove OS origin.
