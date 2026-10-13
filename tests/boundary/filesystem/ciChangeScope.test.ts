@@ -4,9 +4,11 @@ import {
   readFile,
   readdir,
   rename,
+  rm,
   writeFile,
 } from "node:fs/promises";
 import { dirname, join, matchesGlob } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { parse } from "yaml";
@@ -83,7 +85,7 @@ async function classify(
   await writeFile(output, "");
   const result = await execFileAsync(
     process.execPath,
-    [new URL("../../../scripts/ci/plan.mjs", import.meta.url).pathname],
+    [fileURLToPath(new URL("../../../scripts/ci/plan.mjs", import.meta.url))],
     {
       cwd: directory,
       env: {
@@ -108,6 +110,7 @@ it("keeps every translated root README and authored guide on the documentation l
   const head = await change(directory, [
     ...readmes,
     "docs/guide.md",
+    "native/windows/README.md",
     "AGENTS.md",
     "CONTRIBUTING.md",
   ]);
@@ -130,6 +133,29 @@ it("does not charge a documentation PR for unrelated implementation updates on m
     package: false,
   });
 });
+
+it.each(["modify", "delete", "rename"])(
+  "keeps the packaged portable guide on the package lane after %s",
+  async (operation) => {
+    const { directory } = await fixture();
+    const path = "docs/portable-windows.md";
+    const base = await change(directory, [path], "Portable artifact input\n");
+    if (operation === "modify")
+      await writeFile(join(directory, path), "Updated portable guide\n");
+    else if (operation === "delete") await rm(join(directory, path));
+    else await rename(join(directory, path), join(directory, "docs/moved.md"));
+    const head = await commit(directory);
+    expect(await classify(directory, base, head)).toMatchObject({
+      code: true,
+      package: true,
+      runtime: true,
+      docs: true,
+      apple: false,
+      browser: false,
+      evm: false,
+    });
+  },
+);
 
 it.each([
   "src/README.md",
@@ -297,6 +323,38 @@ it.each([
   ],
   ["install.sh", { code: true, runtime: true, package: true, evm: false }],
   [
+    "scripts/package-portable-windows.mjs",
+    { code: true, runtime: true, package: true, apple: false, evm: false },
+  ],
+  [
+    "scripts/verify-portable-windows.mjs",
+    { code: true, runtime: true, package: true, apple: false, evm: false },
+  ],
+  [
+    "scripts/lib/portable-dependencies.mjs",
+    { code: true, runtime: true, package: true, apple: false, evm: false },
+  ],
+  [
+    "scripts/lib/portable-inventory.mjs",
+    { code: true, runtime: true, package: true, apple: false, evm: false },
+  ],
+  [
+    "scripts/lib/portable-launcher.ps1",
+    { code: true, runtime: true, package: true, apple: false, evm: false },
+  ],
+  [
+    "tests/process-global/runnerCancellation.test.ts",
+    { code: true, runtime: true, package: true, apple: false, evm: false },
+  ],
+  [
+    "src/ghidra/GhidraLauncher.ts",
+    { code: true, runtime: true, package: true, apple: false, evm: false },
+  ],
+  [
+    "src/ghidra/GhidraJavaLaunch.ts",
+    { code: true, runtime: true, package: true, apple: false, evm: false },
+  ],
+  [
     ".agents/skills/reverse-engineer-anything/SKILL.md",
     { code: true, runtime: true, docs: true, package: false, evm: false },
   ],
@@ -419,8 +477,9 @@ it.each([
 );
 
 it("rejects skipped selected work while allowing unselected lanes to skip", async () => {
-  const command = new URL("../../../scripts/ci/required.mjs", import.meta.url)
-    .pathname;
+  const command = fileURLToPath(
+    new URL("../../../scripts/ci/required.mjs", import.meta.url),
+  );
   const jobs = {
     changes: { result: "success", outputs: { evm: "true" } },
     static: { result: "success" },
