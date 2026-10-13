@@ -96,13 +96,16 @@ export class PlaywrightElectronActiveProvider implements ElectronActiveObservati
         await systemProcessOwnershipHost.captureBaseline?.(options.signal);
       if (options.signal?.aborted)
         throw new BrowserObservationError(OPERATION, "cancelled");
-      application = await this.launch({
+      const launchOptions: Parameters<typeof electron.launch>[0] = {
         executablePath: paths.executable,
         cwd: paths.root,
         env: safeElectronEnvironment(this.environment, runId),
         args: ["-r", hookPath, paths.application, ...input.args],
         timeout: Math.max(1, startupDeadline - performance.now()),
-      });
+      };
+      application = await containLaunchRejections(() =>
+        this.launch(launchOptions),
+      );
       const leaderPid = application.process().pid;
       if (
         typeof leaderPid !== "number" ||
@@ -376,6 +379,51 @@ const safeElectronEnvironment = (
       ),
     ["REA_PROCESS_RUN_ID", runId] as const,
   ]);
+
+const PLAYWRIGHT_INTERNAL_FRAME = /playwright-core[\\/]lib[\\/]/;
+const absorbedRejections = new WeakSet<object>();
+
+/** Playwright leaves rejected launch promises unhandled; absorb only those that repeat this launch's failure. */
+const containLaunchRejections = async <T>(
+  launch: () => Promise<T>,
+): Promise<T> => {
+  const held: { readonly reason: Error; readonly promise: Promise<unknown> }[] =
+    [];
+  const hold = (reason: unknown, promise: Promise<unknown>): void => {
+    if (
+      !(reason instanceof Error) ||
+      !PLAYWRIGHT_INTERNAL_FRAME.test(reason.stack ?? "")
+    )
+      throw reason;
+    held.push({ reason, promise });
+  };
+  let failure: unknown;
+  process.on("unhandledRejection", hold);
+  try {
+    return await launch();
+  } catch (cause: unknown) {
+    failure = cause;
+    throw cause;
+  } finally {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    process.off("unhandledRejection", hold);
+    for (const { reason, promise } of held) {
+      if (
+        failure instanceof Error &&
+        reason.message !== "" &&
+        failure.message.includes(reason.message)
+      )
+        absorbedRejections.add(reason);
+      else if (
+        !absorbedRejections.has(reason) &&
+        !process.emit("unhandledRejection", reason, promise)
+      )
+        process.nextTick(() => {
+          throw reason;
+        });
+    }
+  }
+};
 
 const providerError = (cause: unknown): AnalysisError =>
   cause instanceof AnalysisError
