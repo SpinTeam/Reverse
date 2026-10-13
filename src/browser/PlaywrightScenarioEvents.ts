@@ -58,6 +58,7 @@ export class PlaywrightScenarioEvents {
   private readonly incompleteFamilies = new Set<EventName>();
   private readonly network: PlaywrightScenarioNetwork | undefined;
   private stopNetwork: (() => void) | undefined;
+  private readonly stopListeners: Array<() => void> = [];
   private sealed = false;
 
   constructor(options: EventCaptureOptions) {
@@ -72,10 +73,12 @@ export class PlaywrightScenarioEvents {
     this.secrets = options.secrets;
     this.ownsContext = options.ownsContext === true;
     this.pages.add(options.page);
-    if (this.ownsContext && this.enabled.size > 0)
-      (options.context ?? options.page.context()).on("page", (page) =>
-        this.popup(page),
-      );
+    if (this.ownsContext && this.enabled.size > 0) {
+      const context = options.context ?? options.page.context();
+      const onPage = (page: Page) => this.popup(page);
+      context.on("page", onPage);
+      this.stopListeners.push(() => context.off("page", onPage));
+    }
     if (this.enabled.has("network")) {
       const context = options.context ?? options.page.context();
       const collector = new PlaywrightScenarioNetwork({
@@ -138,6 +141,8 @@ export class PlaywrightScenarioEvents {
   async finish(): Promise<void> {
     this.stopNetwork?.();
     this.stopNetwork = undefined;
+    for (const stop of this.stopListeners.splice(0)) stop();
+    this.pages.clear();
     try {
       await this.network?.finish();
     } finally {
@@ -185,33 +190,57 @@ export class PlaywrightScenarioEvents {
   }
 
   private observePage(page: Page): void {
-    if (this.enabled.has("console"))
-      page.on("console", (message) => this.console(message));
-    if (this.enabled.has("page-errors"))
-      page.on("pageerror", (error) => {
+    if (this.enabled.has("console")) {
+      const onConsole = (message: ConsoleMessage) => this.console(message);
+      page.on("console", onConsole);
+      this.stopListeners.push(() => page.off("console", onConsole));
+    }
+    if (this.enabled.has("page-errors")) {
+      const onError = (error: Error) => {
         this.push({
           kind: "page-error",
           message: this.secrets.redact(error.message),
           stack:
             error.stack === undefined ? null : this.secrets.redact(error.stack),
         });
-      });
-    if (this.enabled.has("websockets"))
-      page.on("websocket", (socket) => this.webSocket(socket));
-    if (this.enabled.has("frames")) {
-      page.on("frameattached", (frame) => this.frame("frame-attached", frame));
-      page.on("framedetached", (frame) => this.frame("frame-detached", frame));
-      page.on("framenavigated", (frame) =>
-        this.frame("frame-navigated", frame),
-      );
+      };
+      page.on("pageerror", onError);
+      this.stopListeners.push(() => page.off("pageerror", onError));
     }
-    if (this.enabled.has("workers"))
-      page.on("worker", (worker) => this.worker(worker));
+    if (this.enabled.has("websockets")) {
+      const onWebSocket = (socket: WebSocket) => this.webSocket(socket);
+      page.on("websocket", onWebSocket);
+      this.stopListeners.push(() => page.off("websocket", onWebSocket));
+    }
+    if (this.enabled.has("frames")) {
+      const onAttached = (frame: Frame) => this.frame("frame-attached", frame);
+      const onDetached = (frame: Frame) => this.frame("frame-detached", frame);
+      const onNavigated = (frame: Frame) =>
+        this.frame("frame-navigated", frame);
+      page.on("frameattached", onAttached);
+      page.on("framedetached", onDetached);
+      page.on("framenavigated", onNavigated);
+      this.stopListeners.push(() => page.off("frameattached", onAttached));
+      this.stopListeners.push(() => page.off("framedetached", onDetached));
+      this.stopListeners.push(() => page.off("framenavigated", onNavigated));
+    }
+    if (this.enabled.has("workers")) {
+      const onWorker = (worker: Worker) => this.worker(worker);
+      page.on("worker", onWorker);
+      this.stopListeners.push(() => page.off("worker", onWorker));
+    }
     // Any selected family needs descendant discovery in shared contexts.
     // Popup lifecycle records remain gated on their own selector below.
-    if (this.enabled.size > 0) page.on("popup", (popup) => this.popup(popup));
-    if (this.enabled.has("downloads"))
-      page.on("download", (download) => this.download(download));
+    if (this.enabled.size > 0) {
+      const onPopup = (popup: Page) => this.popup(popup);
+      page.on("popup", onPopup);
+      this.stopListeners.push(() => page.off("popup", onPopup));
+    }
+    if (this.enabled.has("downloads")) {
+      const onDownload = (download: Download) => this.download(download);
+      page.on("download", onDownload);
+      this.stopListeners.push(() => page.off("download", onDownload));
+    }
   }
 
   private safeUrl(value: string) {
@@ -231,13 +260,17 @@ export class PlaywrightScenarioEvents {
   private webSocket(socket: WebSocket): void {
     const url = this.safeUrl(socket.url());
     this.push({ kind: "websocket-opened", url });
-    socket.on("framesent", ({ payload }) =>
-      this.webSocketFrame("websocket-frame-sent", url, payload),
-    );
-    socket.on("framereceived", ({ payload }) =>
-      this.webSocketFrame("websocket-frame-received", url, payload),
-    );
-    socket.on("close", () => this.push({ kind: "websocket-closed", url }));
+    const onSent = ({ payload }: { payload: string | Buffer }) =>
+      this.webSocketFrame("websocket-frame-sent", url, payload);
+    const onReceived = ({ payload }: { payload: string | Buffer }) =>
+      this.webSocketFrame("websocket-frame-received", url, payload);
+    const onClose = () => this.push({ kind: "websocket-closed", url });
+    socket.on("framesent", onSent);
+    socket.on("framereceived", onReceived);
+    socket.on("close", onClose);
+    this.stopListeners.push(() => socket.off("framesent", onSent));
+    this.stopListeners.push(() => socket.off("framereceived", onReceived));
+    this.stopListeners.push(() => socket.off("close", onClose));
   }
 
   private webSocketFrame(
@@ -286,7 +319,9 @@ export class PlaywrightScenarioEvents {
       name: null,
     };
     this.push({ kind: "worker-created", ...details });
-    worker.on("close", () => this.push({ kind: "worker-closed", ...details }));
+    const onClose = () => this.push({ kind: "worker-closed", ...details });
+    worker.on("close", onClose);
+    this.stopListeners.push(() => worker.off("close", onClose));
   }
 
   private popup(page: Page): void {
@@ -305,13 +340,14 @@ export class PlaywrightScenarioEvents {
     };
     if (this.enabled.has("popups")) {
       this.push({ kind: "popup-opened", ...opened });
-      page.on("close", () =>
+      const onClose = () =>
         this.push({
           kind: "popup-closed",
           url: page.url() === "" ? null : this.safeUrl(page.url()),
           name: null,
-        }),
-      );
+        });
+      page.on("close", onClose);
+      this.stopListeners.push(() => page.off("close", onClose));
     }
     this.observePage(page);
   }
