@@ -129,6 +129,7 @@ if (
         file,
       ) ||
       file.startsWith("docs/") ||
+      file === "scripts/verify-documentation-routes.mjs" ||
       file.startsWith(".github/ISSUE_TEMPLATE/")
     ) {
       selected.docs = true;

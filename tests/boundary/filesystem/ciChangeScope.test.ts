@@ -118,6 +118,16 @@ it("keeps every translated root README and authored guide on the documentation l
   });
 });
 
+it("runs documentation verification when only its published-route verifier changes", async () => {
+  const { directory, base } = await fixture();
+  const head = await change(directory, [
+    "scripts/verify-documentation-routes.mjs",
+  ]);
+  expect(await classify(directory, base, head)).toMatchObject({
+    docs: true,
+  });
+});
+
 it("does not charge a documentation PR for unrelated implementation updates on main", async () => {
   const { directory, base } = await fixture();
   await git(directory, ["switch", "-c", "docs/change"]);

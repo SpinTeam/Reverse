@@ -32,7 +32,7 @@ for (const variable of ["REA_BINWALK_COMMAND", "REA_UNBLOB_COMMAND"]) {
   const path = process.env[variable];
   if (path === undefined)
     throw new Error(
-      `verify:firmware requires ${variable}; see docs/firmware-analysis.md`,
+      `verify:firmware requires ${variable}; see docs/guides/firmware/firmware-analysis.md`,
     );
   await access(path);
 }
