@@ -74,6 +74,40 @@ Setup supports Claude Code, Codex, Cursor, Gemini CLI, Grok Build and
 [installation and setup](docs/installation.md) for provider configuration and
 manual MCP registration.
 
+### DeepSeek Harness native plugin
+
+**Desktop → Plugins → Add plugin:** paste the complete Git distribution URL
+below, **including the `#dsh-plugin-v0.2.0` tag**:
+
+```text
+https://github.com/xxxxxwater/rea#dsh-plugin-v0.2.0
+```
+
+The tag resolves to an independent, build-free `dsh-rea-bundle` package.
+The repository URL without this tag resolves to `rea-agents` on `main`,
+which is **not** a native Harness plugin and may fail with
+`ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`. Do not loosen pnpm `allowBuilds`.
+
+For the separate Web CLI profile:
+
+```sh
+dsh plugin --profile web add 'github:xxxxxwater/rea#dsh-plugin-v0.2.0'
+dsh --profile web --dump-config
+```
+
+After a successful install, **enable the bundle** in
+**Desktop → Plugins → Installed plugins → dsh-rea-bundle**.
+A dependency in `package.json` alone does **not** mean it is selected
+in `dsh.profile.bundles`. If the toggle is unavailable, the
+[local-only activation and verification script](integrations/deepseek-harness/README.md#desktop-installed-the-bundle-but-did-not-activate-it)
+backs up the Desktop profile without reinstalling REA or touching other plugins.
+
+Alternatively, install the `dsh-rea-bundle-0.2.0.tgz` asset from the
+`dsh-v0.2.0` GitHub Release. The Desktop profile is app-managed, not the
+CLI's `web` profile. See
+`integrations/deepseek-harness/README.md` for migration, rollback,
+Desktop compatibility limits and troubleshooting.
+
 ### Ask your agent
 
 ```text
