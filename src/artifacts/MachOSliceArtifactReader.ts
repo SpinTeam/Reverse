@@ -9,7 +9,7 @@ import {
 } from "../native/CommandRunner.js";
 import {
   lipoSubtypeBits,
-  parseLipoArchitectures,
+  parseLipoOutput,
   type LipoArchitecture,
 } from "../native/parsers/lipo.js";
 import type { MachoSlice } from "../domain/apple/dylibResolution.js";
@@ -112,7 +112,7 @@ export class MachOSliceArtifactReader implements ArtifactReader {
     };
     await this.#verifySource(source);
     const fileSize = source.initial.size;
-    const architectures = parseLipoArchitectures(captured.value.stdout);
+    const { architectures } = parseLipoOutput(captured.value.stdout, this.path);
     const structural = await readStructuralSlices(source.handle, fileSize);
     await this.#verifySource(source);
     if (structural.status === "malformed")
