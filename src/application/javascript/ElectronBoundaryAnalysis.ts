@@ -3,6 +3,7 @@ import type { ElectronIpcFinding } from "../../domain/javascript/electronStaticA
 import type { ElectronBoundarySummary } from "../../domain/javascript/javascriptApplicationAnalysis.js";
 import type { JavaScriptModuleArtifactAnalysis } from "./JavaScriptArtifactAnalysisTypes.js";
 import type { JavaScriptArtifactFile } from "../../domain/javascript/javascriptArtifactFiles.js";
+import type { JavaScriptModuleResolutionMode } from "../../domain/javascript/javascriptModuleResolutionMode.js";
 import { resolveArtifactPathByContext } from "./JavaScriptArtifactPathResolution.js";
 
 /** One IPC fact retaining its exact owning artifact for graph projection. */
@@ -203,7 +204,7 @@ interface ResolveToFileInput {
   readonly context: "module-specifier" | "filesystem-expression";
   readonly files: ReadonlyMap<string, JavaScriptArtifactFile>;
   readonly kind?: JavaScriptArtifactFile["kind"];
-  readonly moduleKind?: "import" | "require";
+  readonly moduleKind?: JavaScriptModuleResolutionMode;
 }
 
 const resolvesToFile = (input: ResolveToFileInput): boolean => {
