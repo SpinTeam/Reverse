@@ -81,6 +81,12 @@ export const resolveJavaScriptIntrinsicInvocation = (
   let explicitReceiver = false;
   for (;;) {
     callee = unwrapJavaScriptExpression(callee).node;
+    if (t.isSequenceExpression(callee)) {
+      const finalExpression = callee.expressions.at(-1);
+      if (finalExpression === undefined) return undefined;
+      callee = finalExpression;
+      continue;
+    }
     if (visited.has(callee)) return undefined;
     visited.add(callee);
     let path = intrinsicPath(callee);
@@ -129,7 +135,14 @@ export const resolveJavaScriptIntrinsicInvocation = (
         : t.isMemberExpression(callee) || t.isOptionalMemberExpression(callee)
           ? callee.object
           : undefined;
-      if (!t.isExpression(callable)) return undefined;
+      // The callee resolves to an invocation member read but names no
+      // callable, as when an identifier aliases `Object.defineProperty.call`
+      // and is invoked bare. Such a call throws TypeError when no callable
+      // receiver exists, which static analysis cannot prove. An unexamined
+      // receiver is unknown effect, neither proof of no write nor a
+      // confirmed write.
+      if (!t.isExpression(callable))
+        return { kind: "opaque", path, arguments: undefined };
       callee = callable;
       receiver = arguments_?.[0];
       explicitReceiver = true;
