@@ -33,7 +33,17 @@ export const resolveAnalysisDocument = async (
       {},
       executionOptions(signal),
     );
-    if (!listed.ok) return listed;
+    if (!listed.ok) {
+      if (listed.error instanceof AnalysisCapabilityUnavailableError)
+        return err(
+          new AnalysisCapabilityUnavailableError(
+            listed.error.providerId,
+            "current_document",
+            "provider does not declare document selection (current_document or list_documents)",
+          ),
+        );
+      return listed;
+    }
     const parsed = parseDocuments(listed.value.result);
     if (!parsed.ok)
       return err(
