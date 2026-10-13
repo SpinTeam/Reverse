@@ -510,3 +510,38 @@ describe("managed exception section decoding", () => {
     });
   });
 });
+
+describe("managed CIL operand truncation", () => {
+  it.each([
+    ["ldc.i4 operand", [0x20], "Instruction ldc.i4 at IL offset 0", 0],
+    ["ldc.i4 after nop", [0x00, 0x20], "Instruction ldc.i4 at IL offset 1", 1],
+    ["br.s operand", [0x2b], "Instruction br.s at IL offset 0", 0],
+    [
+      "ldloc operand",
+      [0xfe, 0x0c, 0x00],
+      "Instruction ldloc at IL offset 0",
+      0,
+    ],
+    ["switch count", [0x45, 0x02], "Instruction switch at IL offset 0", 0],
+    ["two-byte opcode", [0x00, 0xfe], "Two-byte CIL opcode at IL offset 1", 1],
+  ])(
+    "names the instruction when a truncated %s leaves the method body",
+    (_case, il, issue, decoded) => {
+      const bytes = buildManagedPeFixture({
+        ilBody: Buffer.from([0x02 | (il.length << 2), ...il]),
+      });
+      const result = inspectManagedMembersBytes(
+        bytes,
+        managedPeFixtureTarget(bytes),
+      );
+
+      expect(result.methods[0]?.body).toMatchObject({
+        status: "malformed",
+        il_size: il.length,
+        normalized_il_sha256: null,
+        decoded_instruction_count: decoded,
+        issue: `${issue} leaves method body`,
+      });
+    },
+  );
+});
