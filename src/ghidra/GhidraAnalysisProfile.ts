@@ -269,7 +269,7 @@ export const resolveGhidraAnalysisProfile = async (
             }
           : {}),
         ...analyzerParameters,
-        ...ghidraMipsProfileParameters(target),
+        ...ghidraMipsProfileParameters(target, languageOverride),
         ...ghidraRiscvProfileParameters(target),
         ...(pspExtension?.ok === true
           ? {
