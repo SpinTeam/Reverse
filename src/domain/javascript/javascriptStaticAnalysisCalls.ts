@@ -11,6 +11,7 @@ import {
   argumentNode,
   argumentValue,
   calleeName,
+  calleeSegmentsEndWith,
   endpointArgument as endpointArgumentHelper,
   prefixedArgument,
   range,
@@ -94,13 +95,13 @@ export const inspectCall = (
           ? undefined
           : workerUrlSpecifier(worker, bindings)),
     });
-  if (name.endsWith("serviceWorker.register"))
+  if (calleeSegmentsEndWith(node.callee, "serviceWorker.register"))
     addReference(context, { node, kind: "service-worker", specifier: first });
   inspectEndpointCall(node, name, first, context);
   inspectStorageCall(node, name, first, context);
   if (first === "audio" || first === "video")
     noteMediaElementPreloads(node, accumulator);
-  if (name.endsWith("loadFile") && first !== undefined)
+  if (calleeSegmentsEndWith(node.callee, "loadFile") && first !== undefined)
     addLocatedFinding(context, {
       collection: accumulator.roles,
       key: `role\0renderer\0${first}`,
@@ -114,7 +115,7 @@ export const inspectCall = (
         location: range(node),
       },
     });
-  if (name.endsWith("loadURL") && first !== undefined)
+  if (calleeSegmentsEndWith(node.callee, "loadURL") && first !== undefined)
     addLocatedFinding(context, {
       collection: accumulator.roles,
       key: `role\0renderer\0${first}`,
