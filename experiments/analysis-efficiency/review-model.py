@@ -67,9 +67,47 @@ def scope_with_verified_counts(value, expected_scope, returned_counts):
     return scope, checks
 
 
+def pcap_observation_fields(value):
+    """Equivalent explicit labels are accepted; conflicting duplicates remain failures."""
+    if not isinstance(value, dict):
+        return value
+    result = dict(value)
+    for label, canonical in {
+        'outer_limitations': 'limitations', 'normalized_kind': 'kind',
+        'normalized_view': 'view', 'normalized_parent_evidence_id': 'parent_evidence_id',
+        'normalized_coverage': 'coverage', 'normalized_unknowns': 'unknowns',
+        'normalized_source_coverage': 'source_coverage',
+    }.items():
+        if label not in result:
+            continue
+        if canonical in result and json.dumps(result[label], sort_keys=True) != json.dumps(result[canonical], sort_keys=True):
+            return {**result, 'conflicting_fields': [label, canonical]}
+        result[canonical] = result.pop(label)
+    return result
+
+
+def pcap_complete_capture(value):
+    """Project the selected metadata/counts from the cited complete receipt."""
+    inventories = ['endpoints', 'dns_queries', 'tls_sni_values', 'protocol_distribution',
+                   'http_request_uris', 'unattributed_dns_addresses']
+    if not isinstance(value, dict) or not all(isinstance(value.get(key), list) for key in inventories):
+        return None
+    capture = {key: item for key, item in value.items() if key not in inventories + ['diagnostics']}
+    capture['retained_counts'] = {key: len(value[key]) for key in inventories}
+    diagnostics = value.get('diagnostics')
+    if 'diagnostics' not in value:
+        capture['diagnostics_code_units'] = None
+    elif isinstance(diagnostics, dict) and all(isinstance(diagnostics.get(key + '_stderr'), str) for key in ['tshark', 'capinfos']):
+        capture['diagnostics_code_units'] = {key: len(diagnostics[key + '_stderr'].encode('utf-16-le', errors='surrogatepass')) // 2
+                                             for key in ['tshark', 'capinfos']}
+    else:
+        return None
+    return capture
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--domain', choices=['wasm', 'evm', 'android', 'flutter-aot', 'sqlite', 'managed', 'managed-nonempty', 'firmware', 'inventory', 'javascript', 'native', 'browser'], required=True)
+    parser.add_argument('--domain', choices=['wasm', 'evm', 'android', 'flutter-aot', 'sqlite', 'pcap', 'managed', 'managed-nonempty', 'firmware', 'inventory', 'javascript', 'native', 'browser'], required=True)
     parser.add_argument('--trial', type=Path, required=True)
     parser.add_argument('--reference', type=Path)
     parser.add_argument('--resource-log', type=Path, required=True)
@@ -84,24 +122,25 @@ def main():
     observed_ids = set()
     producer_results = {}
     tool_errors = []
-    for line in (args.trial / 'events.jsonl').open():
-        event = json.loads(line)
-        item = event.get('item', {})
-        if event.get('type') != 'item.completed' or item.get('type') != 'mcp_tool_call':
-            continue
-        result = item.get('result') or {}
-        parsed = decode(result)
-        if item['status'] == 'completed':
-            # Only response text contributes observed IDs, never model arguments.
-            for text in strings(result):
-                observed_ids.update(re.findall(r'ev_[a-f0-9]{64}', text))
-            if parsed is not None:
-                producer_results.setdefault(item['tool'], []).append(parsed)
-        else:
-            tool_errors.append({'tool': item['tool'], 'arguments': item['arguments'], 'response': parsed if parsed is not None else result})
-            if parsed is not None and parsed.get('error', {}).get('code') == 'resource_constraint':
-                reference_value = parsed['error'].get('details', {}).get('reported_limits', {}).get('evidence_reference')
-                observed_ids.update(evidence_ids(reference_value))
+    with (args.trial / 'events.jsonl').open() as event_lines:
+        for line in event_lines:
+            event = json.loads(line)
+            item = event.get('item', {})
+            if event.get('type') != 'item.completed' or item.get('type') != 'mcp_tool_call':
+                continue
+            result = item.get('result') or {}
+            parsed = decode(result)
+            if item['status'] == 'completed':
+                # Only response text contributes observed IDs, never model arguments.
+                for text in strings(result):
+                    observed_ids.update(re.findall(r'ev_[a-f0-9]{64}', text))
+                if parsed is not None:
+                    producer_results.setdefault(item['tool'], []).append(parsed)
+            else:
+                tool_errors.append({'tool': item['tool'], 'arguments': item['arguments'], 'response': parsed if parsed is not None else result})
+                if parsed is not None and parsed.get('error', {}).get('code') == 'resource_constraint':
+                    reference_value = parsed['error'].get('details', {}).get('reported_limits', {}).get('evidence_reference')
+                    observed_ids.update(evidence_ids(reference_value))
     reported_ids = evidence_ids(answer.get('evidence_ids'))
     checks = {
         'reported_evidence_ids_observed_in_responses': bool(reported_ids) and reported_ids <= observed_ids,
@@ -138,6 +177,104 @@ def main():
             # Missing is not SQL/JSON null; booleans are not numeric counters.
             check(key, (key in answer, json.dumps(answer.get(key), sort_keys=True)),
                   (True, json.dumps(reference[key], sort_keys=True)))
+    elif domain == 'pcap':
+        check('capture', ('capture' in answer, json.dumps(answer.get('capture'), sort_keys=True)),
+              (True, json.dumps(reference['capture'], sort_keys=True)))
+        prefix = answer.get('http_request_uris_first2')
+        records = {value['evidence_id']: value for values in producer_results.values()
+                   for value in values if isinstance(value, dict) and 'evidence_id' in value}
+        observations = answer.get('delivery_observations')
+        canonical_observations = [pcap_observation_fields(value) for value in observations] if isinstance(observations, list) else observations
+        if isinstance(prefix, dict):
+            checks['pcap_prefix_fields_supported'] = set(prefix) <= {'items', 'coverage', 'source_coverage'} and 'items' in prefix
+            if 'source_coverage' in prefix:
+                check('pcap_prefix_source_coverage', prefix['source_coverage'], reference['capture']['coverage'])
+            if 'coverage' in prefix:
+                last = canonical_observations[-1] if isinstance(canonical_observations, list) and canonical_observations else None
+                identity = last.get('evidence_id') if isinstance(last, dict) else None
+                record = records.get(identity) if isinstance(identity, str) else None
+                page = record['normalized_result'] if record is not None else {}
+                checks['pcap_prefix_coverage_observed'] = (
+                    page.get('kind') == 'pcap'
+                    and page.get('page', {}).get('facet') == 'http-uris'
+                    and json.dumps(page['page'].get('items'), sort_keys=True) == json.dumps(prefix.get('items'), sort_keys=True)
+                    and 'coverage' in page
+                    and json.dumps(prefix['coverage'], sort_keys=True) == json.dumps(page['coverage'], sort_keys=True)
+                )
+            prefix = prefix.get('items')
+        check('http_request_uris_first2', ('http_request_uris_first2' in answer, json.dumps(prefix, sort_keys=True)),
+              (True, json.dumps(reference['http_request_uris_first2'], sort_keys=True)))
+        expected_observations = []
+        if isinstance(canonical_observations, list):
+            for observation in canonical_observations:
+                identity = observation.get('evidence_id') if isinstance(observation, dict) else None
+                record = records.get(identity) if isinstance(identity, str) else None
+                if record is None:
+                    expected_observations.append(None)
+                    continue
+                value = record['normalized_result']
+                expected = {'evidence_id': record['evidence_id'], 'limitations': record['limitations']}
+                for key in ['kind', 'view', 'parent_evidence_id', 'coverage', 'unknowns']:
+                    if key in value:
+                        expected[key] = value[key]
+                if 'limitations' in value:
+                    expected['normalized_limitations'] = value['limitations']
+                if 'source_coverage' in observation and 'source_coverage' in value:
+                    expected['source_coverage'] = value['source_coverage']
+                expected_observations.append(expected)
+        checks['pcap_delivery_observations_nonempty'] = isinstance(observations, list) and bool(observations)
+        check('pcap_original_delivery_observations', json.dumps(canonical_observations, sort_keys=True),
+              json.dumps(expected_observations, sort_keys=True))
+        if isinstance(canonical_observations, list) and all(isinstance(x, dict) for x in canonical_observations):
+            check('pcap_requested_delivery_chain', [x.get('kind', 'complete') for x in canonical_observations],
+                  [x.get('kind', 'complete') for x in reference['delivery_observations']])
+            check('pcap_requested_views', [x.get('view') for x in canonical_observations],
+                  [x.get('view') for x in reference['delivery_observations']])
+            identities = [x.get('evidence_id') for x in canonical_observations]
+            checks['pcap_observations_have_reported_ids'] = (
+                isinstance(answer.get('evidence_ids'), list)
+                and answer['evidence_ids'] == identities
+                and all(isinstance(value, str) and re.fullmatch(r'ev_[a-f0-9]{64}', value) for value in identities)
+                and len(set(identities)) == len(identities)
+            )
+            cited = [records.get(identity) if isinstance(identity, str) else None for identity in identities]
+            checks['pcap_cited_source_supports_uri_prefix'] = False
+            checks['pcap_cited_capture'] = False
+            if all(isinstance(record, dict) for record in cited):
+                if len(cited) == 1:
+                    source = cited[0]['normalized_result']
+                    check('pcap_cited_capture', json.dumps(answer.get('capture'), sort_keys=True),
+                          json.dumps(pcap_complete_capture(source), sort_keys=True))
+                    checks['pcap_cited_source_supports_uri_prefix'] = (
+                        source.get('target') == reference['capture']['target']
+                        and isinstance(source.get('http_request_uris'), list)
+                        and json.dumps(source['http_request_uris'][:2], sort_keys=True) == json.dumps(prefix, sort_keys=True)
+                    )
+                elif len(cited) == 2:
+                    source, page = [record['normalized_result'] for record in cited]
+                    capture = source.get('summary', {})
+                    check('pcap_cited_capture', json.dumps(answer.get('capture'), sort_keys=True),
+                          json.dumps(capture, sort_keys=True))
+                    selected_page = page.get('page', {})
+                    checks['pcap_cited_source_supports_uri_prefix'] = (
+                        source.get('kind') == 'summary'
+                        and source.get('parent_operation') == 'inspect_pcap_capture'
+                        and capture == reference['capture']
+                        and isinstance(source.get('parent_evidence_id'), str)
+                        and page.get('parent_evidence_id') == source['parent_evidence_id']
+                        and page.get('parent_operation') == 'inspect_pcap_capture'
+                        and page.get('view') == {'kind': 'pcap', 'facet': 'http-uris', 'offset': 0, 'limit': 2}
+                        and selected_page.get('facet') == 'http-uris'
+                        and json.dumps(selected_page.get('items'), sort_keys=True) == json.dumps(prefix, sort_keys=True)
+                        and page.get('source_coverage') == capture.get('coverage')
+                        and page.get('artifact') == {key: capture['target'][key] for key in ['path', 'sha256']}
+                    )
+        else:
+            checks['pcap_requested_delivery_chain'] = False
+            checks['pcap_observations_have_reported_ids'] = False
+            checks['pcap_requested_views'] = False
+            checks['pcap_cited_source_supports_uri_prefix'] = False
+            checks['pcap_cited_capture'] = False
     elif domain == 'flutter-aot':
         for key in ['target', 'abi', 'libapp', 'string_pool', 'coverage', 'limitations']:
             check(key, answer.get(key), reference[key])
