@@ -21,6 +21,9 @@ import { createRecordedCrashService } from "../composition/binaryDiagnostics.js"
 import { createGoBinaryService } from "../composition/go.js";
 import type { GoBinaryService } from "../application/go/GoBinaryService.js";
 import { registerGoTools } from "./registerGoTools.js";
+import { createRustBinaryService } from "../composition/rust.js";
+import type { RustBinaryService } from "../application/rust/RustBinaryService.js";
+import { registerRustTools } from "./registerRustTools.js";
 import type { RecordedCrashService } from "../application/binaryDiagnostics/RecordedCrashService.js";
 import { registerAnalysisViewTool } from "./registerAnalysisViewTool.js";
 import { registerBinaryDiagnosticsTools } from "./registerBinaryDiagnosticsTools.js";
@@ -137,6 +140,7 @@ export interface CreateServerOptions {
   readonly logger?: Logger;
   readonly binaryLayout?: BinaryLayoutService;
   readonly goBinary?: GoBinaryService;
+  readonly rustBinary?: RustBinaryService;
   readonly recordedCrash?: RecordedCrashService;
   readonly firmwareAnalysis?: FirmwareAnalysisPort;
   readonly javascriptRecovery?: JavaScriptRecoveryPort;
@@ -549,6 +553,13 @@ const registerConfiguredAnalysisTools = (
   registerGoTools(
     server,
     options.goBinary ?? createGoBinaryService(),
+    toolLogger,
+    recordEvidence,
+    withAdmittedAnalysis,
+  );
+  registerRustTools(
+    server,
+    options.rustBinary ?? createRustBinaryService(),
     toolLogger,
     recordEvidence,
     withAdmittedAnalysis,
