@@ -18,6 +18,7 @@ export interface ScriptCaptureAdapter {
 export interface SelectedScriptCapture {
   readonly kind: WebScriptExportResult["capture_kind"];
   readonly completeness: WebScriptExportResult["capture_completeness"];
+  readonly workerCoverage?: WebScriptExportResult["worker_coverage"];
   readonly scripts: readonly CapturedWebScript[];
   readonly limitations: readonly string[];
 }
@@ -32,6 +33,11 @@ export const SCRIPT_CAPTURE_ADAPTERS: readonly ScriptCaptureAdapter[] = [
         ? {
             kind: "page-inspection",
             completeness: parsed.data.completeness,
+            workerCoverage: parsed.data.workers.map((worker) => ({
+              target_id: worker.target_id,
+              completeness: worker.observation?.completeness ?? null,
+              limitations: worker.observation?.limitations ?? [],
+            })),
             scripts: pageScripts(parsed.data),
             limitations: parsed.data.limitations,
           }
