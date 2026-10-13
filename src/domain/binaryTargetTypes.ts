@@ -108,6 +108,17 @@ type ExecutableTarget = BinaryTargetIdentity & {
   readonly availableArchitectures: readonly HeaderArchitecture[];
 };
 
+/** Caller-selected matching dSYM bundle admitted beside a Mach-O target. */
+export interface MachODebugCompanion {
+  /** Absolute path of the caller-selected .dSYM bundle directory. */
+  readonly sourcePath: string;
+  /** DWARF member inside the bundle whose LC_UUID matched the target image. */
+  readonly memberPath: string;
+  readonly memberSha256: string;
+  /** The LC_UUID shared by the target image and the matched member. */
+  readonly uuid: string;
+}
+
 /**
  * Canonical local target identity and provider-neutral file classification.
  * Each variant carries only metadata established for that exact file kind.
@@ -136,6 +147,8 @@ export type BinaryTarget =
       readonly universalSlice?: never;
       readonly executableRole?: never;
       readonly managed?: never;
+      /** Carried only when the detected format is mach-o. */
+      readonly debugCompanion?: MachODebugCompanion;
     })
   | (ExecutableTarget & {
       readonly format: "mach-o-universal";
@@ -143,6 +156,8 @@ export type BinaryTarget =
       readonly universalSlice: UniversalMachOSlice;
       readonly executableRole?: never;
       readonly managed?: never;
+      /** Carried only when the detected format is mach-o or mach-o-universal. */
+      readonly debugCompanion?: MachODebugCompanion;
     })
   | (ExecutableTarget & {
       readonly format: "raw-binary";
