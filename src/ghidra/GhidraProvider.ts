@@ -311,11 +311,17 @@ const inspectWindowsP0TargetSupport = (
       reason: "Windows Ghidra P0 accepts PE targets only.",
       diagnostics,
     };
-  if (target.architecture !== "x86" && target.architecture !== "x86_64")
+  if (
+    target.architecture !== "x86" &&
+    target.architecture !== "x86_64" &&
+    target.architecture !== "arm" &&
+    target.architecture !== "arm64"
+  )
     return {
       status: "unsupported",
       code: "architecture_unsupported",
-      reason: "Windows Ghidra P0 accepts x86 and x86-64 PE targets only.",
+      reason:
+        "Windows Ghidra P0 accepts x86, x86-64, ARM and ARM64 PE targets only.",
       diagnostics,
     };
   if (

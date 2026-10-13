@@ -66,14 +66,20 @@ if (
   );
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const architecture = process.argv.includes("--x86") ? "x86" : "x86_64";
+const architecture = process.argv.includes("--x86")
+  ? "x86"
+  : process.argv.includes("--arm64")
+    ? "arm64"
+    : "x86_64";
 const dllFixture = process.argv.includes("--dll");
 const role = dllFixture ? "shared-library" : "application";
 const targetPath = resolve(
   root,
   "build",
   "fixtures",
-  `rea-ghidra-windows${architecture === "x86" ? "-x86" : ""}.${dllFixture ? "dll" : "exe"}`,
+  `rea-ghidra-windows${
+    architecture === "x86" ? "-x86" : architecture === "arm64" ? "-arm64" : ""
+  }.${dllFixture ? "dll" : "exe"}`,
 );
 const target = await parseBinaryTarget(targetPath);
 if (
@@ -128,7 +134,12 @@ try {
     target.value.sha256,
     profile.value.profile.digest,
   );
-  const languagePrefix = architecture === "x86" ? "x86:LE:32:" : "x86:LE:64:";
+  const languagePrefix =
+    architecture === "x86"
+      ? "x86:LE:32:"
+      : architecture === "arm64"
+        ? "AARCH64:LE:64:"
+        : "x86:LE:64:";
   if (!started.value.target.language_id.startsWith(languagePrefix))
     throw new Error("Windows fixture imported with the wrong Ghidra language");
   coordinates = client.diagnostics();
@@ -251,12 +262,16 @@ try {
 
   // The reference controls occupy the EXE fixture's additional function.
   // DLL fixtures retain their independent exported-caller/return controls.
-  const compactReferences = dllFixture
-    ? null
-    : await verifyGhidraCompactReferences(
-        functionOperation,
-        architecture === "x86",
-      );
+  // ARM64 fixtures verify function entry, decompiler readback and the
+  // exported caller/callee relationship; the x86/x64 compact-reference
+  // value-flow battery has no ARM64 instruction encoding in this fixture.
+  const compactReferences =
+    dllFixture || architecture === "arm64"
+      ? null
+      : await verifyGhidraCompactReferences(
+          functionOperation,
+          architecture === "x86",
+        );
   report = {
     ok: true,
     provider: { id: "ghidra", version: SUPPORTED_GHIDRA_VERSION },
