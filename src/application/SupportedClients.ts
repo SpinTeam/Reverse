@@ -371,6 +371,15 @@ const devinDirectory = ({ home, platform, env }: ClientPathContext): string =>
     ? join(env.APPDATA ?? join(home, "AppData", "Roaming"), "devin")
     : join(env.XDG_CONFIG_HOME || join(home, ".config"), "devin");
 
+/**
+ * FreeBuff's own profile directory (its `state.json` root, fixed under
+ * `.config` on every platform). The shared `~/.agents` folder is not
+ * FreeBuff-specific: REA's own skill installs create it, so it cannot
+ * prove FreeBuff is installed.
+ */
+const freebuffProfileDirectory = ({ home }: ClientPathContext): string =>
+  join(home, ".config", "freebuff-desktop");
+
 /** Stable product metadata used to derive setup discovery and documentation. */
 export const SUPPORTED_CLIENT_DEFINITIONS = [
   {
@@ -559,6 +568,17 @@ export const SUPPORTED_CLIENT_DEFINITIONS = [
     configPath: dshPatchDirectory,
     markerPath: dshHomeDirectory,
     format: "dsh",
+  },
+  {
+    name: "freebuff",
+    displayName: "FreeBuff",
+    // FreeBuff discovers personal skills in the shared user agents directory.
+    skillPath: ({ home }: ClientPathContext) => join(home, ".agents", "skills"),
+    // FreeBuff loads MCP servers from the shared user agents directory.
+    configPath: ({ home }: ClientPathContext) =>
+      join(home, ".agents", "mcp.json"),
+    markerPath: freebuffProfileDirectory,
+    format: "json",
   },
   {
     name: "grok_bot",
