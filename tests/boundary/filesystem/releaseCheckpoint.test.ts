@@ -642,24 +642,25 @@ it.skipIf(process.platform === "win32").each([
   { job: "release-please", valid: false },
   { job: "merged-release", valid: true },
   { job: "merged-release", valid: false },
-])(
+] as const)(
   "the actual $job preflight admits the next action only for valid metadata ($valid)",
   async ({ job, valid }) => {
     const f = await fixture();
     const sourceSha = await candidate(f, valid ? "6.0.0" : "5.1.0");
+    const preflightJobSchema = z.object({
+      steps: z.array(
+        z.object({
+          name: z.string().optional(),
+          run: z.string().optional(),
+        }),
+      ),
+    });
     const workflow = z
       .object({
-        jobs: z.record(
-          z.string(),
-          z.object({
-            steps: z.array(
-              z.object({
-                name: z.string().optional(),
-                run: z.string().optional(),
-              }),
-            ),
-          }),
-        ),
+        jobs: z.object({
+          "release-please": preflightJobSchema,
+          "merged-release": preflightJobSchema,
+        }),
       })
       .parse(
         parse(
@@ -672,7 +673,7 @@ it.skipIf(process.platform === "win32").each([
     const command = z
       .string()
       .parse(
-        workflow.jobs[job]?.steps.find(
+        workflow.jobs[job].steps.find(
           (step) =>
             step.name ===
             (job === "merged-release"
